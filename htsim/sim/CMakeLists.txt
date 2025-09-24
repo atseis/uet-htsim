@@ -103,38 +103,25 @@ add_custom_target(
 # Executable Definitions
 # -------------------------------
 # List of Executables and Their Main Source Files.
-add_executable(htsim_tcp main/main_tcp.cpp)
-set_property(TARGET htsim_tcp PROPERTY EXCLUDE_FROM_ALL TRUE)
+set(ALL_EXECUTABLES)
+set(MAIN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/main")
+file(GLOB MAIN_SOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "${MAIN_DIR}/*.cpp")
+foreach(MAIN_SRC ${MAIN_SOURCES})
+    # 获取文件名（不含路径和扩展名），用作可执行文件名
+    get_filename_component(EXEC_NAME ${MAIN_SRC} NAME_WE)
+    string(REPLACE "main_" "htsim_" TARGET_NAME ${EXEC_NAME})
+    # set(TARGET_NAME "htsim_${TARGET_NAME}")
+    # 添加可执行文件
+    # message(STATUS "===========${MAIN_SRC}============")
+    add_executable(${TARGET_NAME} ${MAIN_SRC})
 
-add_executable(htsim_ndp main/main_ndp.cpp)
-set_property(TARGET htsim_ndp PROPERTY EXCLUDE_FROM_ALL TRUE)
+    if(NOT TARGET_NAME STREQUAL "htsim_uec")
+        # 如果不是 uec，就设置 EXCLUDE_FROM_ALL
+        set_property(TARGET ${TARGET_NAME} PROPERTY EXCLUDE_FROM_ALL TRUE)
+    endif()
+    list(APPEND ALL_EXECUTABLES ${TARGET_NAME})
+endforeach()
 
-add_executable(htsim_roce main/main_roce.cpp)
-set_property(TARGET htsim_roce PROPERTY EXCLUDE_FROM_ALL TRUE)
-
-add_executable(htsim_swift main/main_swift.cpp)
-set_property(TARGET htsim_swift PROPERTY EXCLUDE_FROM_ALL TRUE)
-
-add_executable(htsim_hpcc main/main_hpcc.cpp)
-set_property(TARGET htsim_hpcc PROPERTY EXCLUDE_FROM_ALL TRUE)
-
-add_executable(htsim_eqds main/main_eqds.cpp)
-set_property(TARGET htsim_eqds PROPERTY EXCLUDE_FROM_ALL TRUE)
-
-add_executable(htsim_uec main/main_uec.cpp)
-
-# -------------------------------
-# Linking Executables with Libraries
-# -------------------------------
-set (ALL_EXECUTABLES
-    htsim_tcp
-    htsim_ndp
-    htsim_roce
-    htsim_swift
-    htsim_hpcc
-    htsim_eqds
-    htsim_uec
-)
 foreach(EXECUTABLE ${ALL_EXECUTABLES})
     # Link each executable with the 'htsim' library defined in the parent directory.
     target_link_libraries(${EXECUTABLE} PRIVATE htsim_dc)
