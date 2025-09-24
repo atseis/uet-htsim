@@ -8,8 +8,8 @@ option(ENABLE_TESTS "enable the test suite" OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF) # Ensures GNU extensions are disabled
-set(CMAKE_CXX_FLAGS_RELEASE -O3) # Prevent -DNDEBUG, htsim requires 
-                                 # asserts to be enabled.
+set(CMAKE_CXX_FLAGS_RELEASE -O3) # Prevent -DNDEBUG, htsim requires
+# asserts to be enabled.
 # Set compiler flags
 add_compile_options(
     -Wall
@@ -22,7 +22,7 @@ add_compile_options(
 # Optionally enable sanitizers
 # -fsanitize=address -fno-omit-frame-pointer -fsanitize=undefined"
 
-if ( ENABLE_TESTS ) 
+if ( ENABLE_TESTS )
     # Fetch GoogleTest
     FetchContent_Declare(
     googletest
@@ -34,8 +34,8 @@ if ( ENABLE_TESTS )
     enable_testing()
 endif()
 
-# Function to add a symlink creation step for an executable. 
-# Used to create a symlink in the source directory to the executable 
+# Function to add a symlink creation step for an executable.
+# Used to create a symlink in the source directory to the executable
 # in the build directory for easier access and backward compatibility.
 function(add_symlink_target EXECUTABLE TARGET_DIR)
     add_custom_command(
@@ -49,82 +49,98 @@ function(add_symlink_target EXECUTABLE TARGET_DIR)
     )
 endfunction()
 
-# Define source files
-set(SOURCE_FILES
-    aeolusqueue.cpp
-    callback_pipe.cpp
-    cbr.cpp
-    cbrpacket.cpp
-    clock.cpp
-    cnppacket.cpp
-    compositeprioqueue.cpp
-    compositequeue.cpp
-    config.cpp
-    cpqueue.cpp
-    dcqcn.cpp
-    dcqcn_logger.cpp
-    dctcp.cpp
-    dctcp_transfer.cpp
-    ecnprioqueue.cpp
-    ecnqueue.cpp
-    eqds.cpp
-    eqds_logger.cpp
-    eqdspacket.cpp
-    eth_pause_packet.cpp
-    eventlist.cpp
-    exoqueue.cpp
-    fairpullqueue.cpp
-    hpcc.cpp
-    hpccpacket.cpp
-    logfile.cpp
-    loggers.cpp
-    meter.cpp
-    mtcp.cpp
-    ndp.cpp
-    ndp_transfer.cpp
-    ndppacket.cpp
-    ndptunnel.cpp
-    ndptunnelpacket.cpp
-    network.cpp
-    oversubscribed_cc.cpp
-    pciemodel.cpp
-    pipe.cpp
-    priopullqueue.cpp
-    prioqueue.cpp
-    qcn.cpp
-    queue.cpp
-    queue_lossless.cpp
-    queue_lossless_input.cpp
-    queue_lossless_output.cpp
-    randomqueue.cpp
-    rng.cpp
-    roce.cpp
-    rocepacket.cpp
-    buffer_reps.cpp
-    route.cpp
-    routetable.cpp
-    sent_packets.cpp
-    strack.cpp
-    strackpacket.cpp
-    swift.cpp
-    swift_scheduler.cpp
-    swiftpacket.cpp
-    switch.cpp
-    tcp.cpp
-    tcp_periodic.cpp
-    tcp_transfer.cpp
-    tcppacket.cpp
-    trigger.cpp
-    uec.cpp
-    uec_logger.cpp
-    uecpacket.cpp
-    uec_mp.cpp
-    uec_pdcses.cpp
+file(GLOB SOURCE_FILES
+    RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
+    src/**/*.cpp
+    src/*.cpp
 )
+
+# Define source files
+# set(SOURCE_FILES
+#     aeolusqueue.cpp
+#     callback_pipe.cpp
+#     cbr.cpp
+#     cbrpacket.cpp
+#     clock.cpp
+#     cnppacket.cpp
+#     compositeprioqueue.cpp
+#     compositequeue.cpp
+#     config.cpp
+#     cpqueue.cpp
+#     dcqcn.cpp
+#     dcqcn_logger.cpp
+#     dctcp.cpp
+#     dctcp_transfer.cpp
+#     ecnprioqueue.cpp
+#     ecnqueue.cpp
+#     eqds.cpp
+#     eqds_logger.cpp
+#     eqdspacket.cpp
+#     eth_pause_packet.cpp
+#     eventlist.cpp
+#     exoqueue.cpp
+#     fairpullqueue.cpp
+#     hpcc.cpp
+#     hpccpacket.cpp
+#     logfile.cpp
+#     loggers.cpp
+#     meter.cpp
+#     mtcp.cpp
+#     ndp.cpp
+#     ndp_transfer.cpp
+#     ndppacket.cpp
+#     ndptunnel.cpp
+#     ndptunnelpacket.cpp
+#     network.cpp
+#     oversubscribed_cc.cpp
+#     pciemodel.cpp
+#     pipe.cpp
+#     priopullqueue.cpp
+#     prioqueue.cpp
+#     qcn.cpp
+#     queue.cpp
+#     queue_lossless.cpp
+#     queue_lossless_input.cpp
+#     queue_lossless_output.cpp
+#     randomqueue.cpp
+#     rng.cpp
+#     roce.cpp
+#     rocepacket.cpp
+#     buffer_reps.cpp
+#     route.cpp
+#     routetable.cpp
+#     sent_packets.cpp
+#     strack.cpp
+#     strackpacket.cpp
+#     swift.cpp
+#     swift_scheduler.cpp
+#     swiftpacket.cpp
+#     switch.cpp
+#     tcp.cpp
+#     tcp_periodic.cpp
+#     tcp_transfer.cpp
+#     tcppacket.cpp
+#     trigger.cpp
+#     uec.cpp
+#     uec_logger.cpp
+#     uecpacket.cpp
+#     uec_mp.cpp
+#     uec_pdcses.cpp
+# )
 
 # Create static library
 add_library(htsim STATIC ${SOURCE_FILES})
-target_include_directories(htsim PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}) # Needed for header-only libraries (e.g., loggertypes.h).
+target_include_directories(htsim PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/components
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/protocols
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/logging
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/packets
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/models
+) # Needed for header-only libraries (e.g., loggertypes.h).
 
 # Add subdirectories
 add_subdirectory(datacenter)
@@ -139,7 +155,7 @@ if ( ENABLE_TESTS )
         pipe_test
     )
 
-    foreach(UNIT_TEST_FILE ${UNIT_TEST_FILES}) 
+    foreach(UNIT_TEST_FILE ${UNIT_TEST_FILES})
         add_executable(${UNIT_TEST_FILE} ${UNIT_TEST_FILE}.cpp)
         target_link_libraries(${UNIT_TEST_FILE} PRIVATE htsim gtest_main gmock_main)
         gtest_discover_tests(${UNIT_TEST_FILE}
