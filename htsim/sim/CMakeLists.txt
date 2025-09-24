@@ -55,79 +55,6 @@ file(GLOB SOURCE_FILES
     src/*.cpp
 )
 
-# Define source files
-# set(SOURCE_FILES
-#     aeolusqueue.cpp
-#     callback_pipe.cpp
-#     cbr.cpp
-#     cbrpacket.cpp
-#     clock.cpp
-#     cnppacket.cpp
-#     compositeprioqueue.cpp
-#     compositequeue.cpp
-#     config.cpp
-#     cpqueue.cpp
-#     dcqcn.cpp
-#     dcqcn_logger.cpp
-#     dctcp.cpp
-#     dctcp_transfer.cpp
-#     ecnprioqueue.cpp
-#     ecnqueue.cpp
-#     eqds.cpp
-#     eqds_logger.cpp
-#     eqdspacket.cpp
-#     eth_pause_packet.cpp
-#     eventlist.cpp
-#     exoqueue.cpp
-#     fairpullqueue.cpp
-#     hpcc.cpp
-#     hpccpacket.cpp
-#     logfile.cpp
-#     loggers.cpp
-#     meter.cpp
-#     mtcp.cpp
-#     ndp.cpp
-#     ndp_transfer.cpp
-#     ndppacket.cpp
-#     ndptunnel.cpp
-#     ndptunnelpacket.cpp
-#     network.cpp
-#     oversubscribed_cc.cpp
-#     pciemodel.cpp
-#     pipe.cpp
-#     priopullqueue.cpp
-#     prioqueue.cpp
-#     qcn.cpp
-#     queue.cpp
-#     queue_lossless.cpp
-#     queue_lossless_input.cpp
-#     queue_lossless_output.cpp
-#     randomqueue.cpp
-#     rng.cpp
-#     roce.cpp
-#     rocepacket.cpp
-#     buffer_reps.cpp
-#     route.cpp
-#     routetable.cpp
-#     sent_packets.cpp
-#     strack.cpp
-#     strackpacket.cpp
-#     swift.cpp
-#     swift_scheduler.cpp
-#     swiftpacket.cpp
-#     switch.cpp
-#     tcp.cpp
-#     tcp_periodic.cpp
-#     tcp_transfer.cpp
-#     tcppacket.cpp
-#     trigger.cpp
-#     uec.cpp
-#     uec_logger.cpp
-#     uecpacket.cpp
-#     uec_mp.cpp
-#     uec_pdcses.cpp
-# )
-
 # Create static library
 add_library(htsim STATIC ${SOURCE_FILES})
 target_include_directories(htsim PUBLIC
@@ -170,3 +97,49 @@ add_custom_target(
   always_run ALL
   COMMAND ${CMAKE_COMMAND} -E echo "ENABLE_TESTS=${ENABLE_TESTS}"
 )
+
+
+# -------------------------------
+# Executable Definitions
+# -------------------------------
+# List of Executables and Their Main Source Files.
+add_executable(htsim_tcp main/main_tcp.cpp)
+set_property(TARGET htsim_tcp PROPERTY EXCLUDE_FROM_ALL TRUE)
+
+add_executable(htsim_ndp main/main_ndp.cpp)
+set_property(TARGET htsim_ndp PROPERTY EXCLUDE_FROM_ALL TRUE)
+
+add_executable(htsim_roce main/main_roce.cpp)
+set_property(TARGET htsim_roce PROPERTY EXCLUDE_FROM_ALL TRUE)
+
+add_executable(htsim_swift main/main_swift.cpp)
+set_property(TARGET htsim_swift PROPERTY EXCLUDE_FROM_ALL TRUE)
+
+add_executable(htsim_hpcc main/main_hpcc.cpp)
+set_property(TARGET htsim_hpcc PROPERTY EXCLUDE_FROM_ALL TRUE)
+
+add_executable(htsim_eqds main/main_eqds.cpp)
+set_property(TARGET htsim_eqds PROPERTY EXCLUDE_FROM_ALL TRUE)
+
+add_executable(htsim_uec main/main_uec.cpp)
+
+# -------------------------------
+# Linking Executables with Libraries
+# -------------------------------
+set (ALL_EXECUTABLES
+    htsim_tcp
+    htsim_ndp
+    htsim_roce
+    htsim_swift
+    htsim_hpcc
+    htsim_eqds
+    htsim_uec
+)
+foreach(EXECUTABLE ${ALL_EXECUTABLES})
+    # Link each executable with the 'htsim' library defined in the parent directory.
+    target_link_libraries(${EXECUTABLE} PRIVATE htsim_dc)
+    target_link_libraries(${EXECUTABLE} PRIVATE htsim)
+    # Add a post-build command to explicitly remove and recreate the symlink for all previous executables.
+    add_symlink_target(${EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+endforeach()
+
