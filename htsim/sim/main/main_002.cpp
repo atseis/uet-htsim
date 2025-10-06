@@ -25,7 +25,7 @@
 using namespace std;
 
 int main(int argc, char* argv[]) {
-    freopen("output.txt", "w", stdout);
+    // freopen("output.txt", "w", stdout);
     EventList eventlist;
     simtime_picosec end_time = timeFromSec(1);
     Clock c(timeFromSec(50 / 100.), eventlist);

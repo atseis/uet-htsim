@@ -19,6 +19,10 @@ add_compile_options(
     -fPIE
     -O3
 )
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    add_compile_options(-O0 -g -ggdb3 -fno-omit-frame-pointer -fno-inline)
+endif()
+
 # Optionally enable sanitizers
 # -fsanitize=address -fno-omit-frame-pointer -fsanitize=undefined"
 
