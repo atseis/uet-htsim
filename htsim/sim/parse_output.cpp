@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
     }
 
     for (int i = 0; i < numRecords; i++) {
-        if (!timeRec[i]) {
+        if (!timeRec[i] && (Logger::EventType)typeRec[i] != Logger::FLOW_EVENT) {
             continue;
         }
 

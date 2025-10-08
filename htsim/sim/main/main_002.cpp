@@ -16,6 +16,7 @@
 #include "eventlist.h"
 #include "logfile.h"
 #include "loggers.h"
+#include "loggertypes.h"
 #include "ndp.h"
 #include "network.h"
 #include "pipe.h"
@@ -64,11 +65,11 @@ int main(int argc, char* argv[]) {
     Pipe pipe2(RTT1, eventlist);
     pipe2.setName("pipe2");
     logfile.writeName(pipe2);
-    CompositeQueue queue1(SERVICE1, queuesize, eventlist, NULL, 64, true);
+    CompositeQueue queue1(SERVICE1, queuesize, eventlist, NULL, 64, false);
     queue1.setName("Queue1");
     logfile.writeName(queue1);
     queue1.set_ecn_threshold(ecn_threshold);
-    CompositeQueue queue2(SERVICE1, queuesize, eventlist, NULL, 64, true);
+    CompositeQueue queue2(SERVICE1, queuesize, eventlist, NULL, 64, false);
     queue2.setName("Queue2");
     logfile.writeName(queue2);
     queue2.set_ecn_threshold(ecn_threshold);
@@ -86,14 +87,24 @@ int main(int argc, char* argv[]) {
 
     vector<NdpSrc*> ndp_srcs;
 
+    bool log_flow_events = true;
+    FlowEventLoggerSimple* event_logger = NULL;
+    if (log_flow_events) {
+        event_logger = new FlowEventLoggerSimple();
+        logfile.addLogger(*event_logger);
+    }
     for (int i = 0; i < flow_count; i++) {
         // Create Src
         ndpSrc = new NdpSrc(NULL, NULL, eventlist, rts);
         ndpSrc->setRouteStrategy(SINGLE_PATH);
         ndpSrc->setCwnd(cwnd * Packet::data_packet_size());
+        ndpSrc->set_flowsize(100 * Packet::data_packet_size());
         ndpSrc->setName("NDP");
         logfile.writeName(*ndpSrc);
         ndp_srcs.push_back(ndpSrc);
+        if (log_flow_events) {
+            ndpSrc->logFlowEvents(*event_logger);
+        }
         // Create Sink
         ndpSink = new NdpSink(eventlist, SERVICE1, 10);
         ndpSink->setName("NDPSink");
@@ -122,6 +133,7 @@ int main(int argc, char* argv[]) {
     logfile.write("# PktSize=" + ntoa(pktsize) + "bytes");
     double rtt = timeAsSec(RTT1);
     logfile.write("# RTT=" + ntoa(rtt));
+    Logged::dump_idmap();
 
     while (eventlist.doNextEvent()) {
     }
