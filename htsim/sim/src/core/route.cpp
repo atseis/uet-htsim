@@ -1,9 +1,9 @@
-// -*- c-basic-offset: 4; indent-tabs-mode: nil -*-  
-#include <climits>
+// -*- c-basic-offset: 4; indent-tabs-mode: nil -*-
 #include "route.h"
+#include <climits>
 #include "network.h"
-#include "queue.h"
 #include "pipe.h"
+#include "queue.h"
 
 #define MAXQUEUES 10
 
@@ -13,7 +13,7 @@ Route::Route(int size) : _hop_count(0), _reverse(NULL) {
     _sinklist.reserve(size);
 };
 
-Route::Route(const Route& orig, PacketSink& dst) : _sinklist(orig.size()+1){
+Route::Route(const Route& orig, PacketSink& dst) : _sinklist(orig.size() + 1) {
     //_sinklist.resize(orig.size()+1);
     _path_id = orig.path_id();
     _reverse = orig._reverse;
@@ -26,10 +26,8 @@ Route::Route(const Route& orig, PacketSink& dst) : _sinklist(orig.size()+1){
     _hop_count++;
 }
 
-
-Route*
-Route::clone() const {
-    Route *copy = new Route(_hop_count);
+Route* Route::clone() const {
+    Route* copy = new Route(_hop_count);
     copy->set_path_id(_path_id, _no_of_paths);
     /* don't clone the reverse path
        if (_reverse) {
@@ -50,18 +48,16 @@ Route::clone() const {
     return copy;
 }
 
-void
-Route::add_endpoints(PacketSink *src, PacketSink* dst) {
-    //_sinklist.push_back(dst);
+void Route::add_endpoints(PacketSink* src, PacketSink* dst) {
+    _sinklist.push_back(dst);
     if (_reverse) {
         _reverse->push_back(src);
     }
 }
 
-void
-Route::update_hopcount(PacketSink* sink) {
+void Route::update_hopcount(PacketSink* sink) {
     if (dynamic_cast<Pipe*>(sink) != NULL) {
-        //cout << sink->nodename() << " is a hop" << endl;
+        // cout << sink->nodename() << " is a hop" << endl;
         _hop_count++;
     }
     /*
@@ -71,21 +67,20 @@ Route::update_hopcount(PacketSink* sink) {
     */
 }
 
-
-void check_non_null(Route* rt){
+void check_non_null(Route* rt) {
     int fail = 0;
-    for (size_t i=1;i<rt->size()-1;i++)
-        if (rt->at(i)==NULL){
+    for (size_t i = 1; i < rt->size() - 1; i++)
+        if (rt->at(i) == NULL) {
             fail = 1;
             break;
         }
-  
-    if (fail){
-        //    cout <<"Null queue in route"<<endl;
-        for (size_t i=1;i<rt->size()-1;i++)
-            printf("%p ",rt->at(i));
 
-        cout<<endl;
+    if (fail) {
+        //    cout <<"Null queue in route"<<endl;
+        for (size_t i = 1; i < rt->size() - 1; i++)
+            printf("%p ", rt->at(i));
+
+        cout << endl;
         assert(0);
     }
 }
