@@ -48,11 +48,11 @@ class ReorderBufferLogger;
 
 class ReceiptEvent {
 public:
-    ReceiptEvent() : _path_id(-1), _is_header(false) {};
-    ReceiptEvent(uint32_t path_id, bool is_header) : _path_id(path_id), _is_header(is_header) {}
-    inline int32_t path_id() const { return _path_id; }
+    ReceiptEvent() : _pathid(-1), _is_header(false) {};
+    ReceiptEvent(uint32_t path_id, bool is_header) : _pathid(path_id), _is_header(is_header) {}
+    inline int32_t path_id() const { return _pathid; }
     inline bool is_header() const { return _is_header; }
-    int32_t _path_id;
+    int32_t _pathid;
     bool _is_header;
 };
 

@@ -15,7 +15,7 @@ Route::Route(int size) : _hop_count(0), _reverse(NULL) {
 
 Route::Route(const Route& orig, PacketSink& dst) : _sinklist(orig.size() + 1) {
     //_sinklist.resize(orig.size()+1);
-    _path_id = orig.path_id();
+    _pathid = orig.path_id();
     _reverse = orig._reverse;
     _hop_count = orig.hop_count();
     _no_of_paths = orig.no_of_paths();
@@ -28,7 +28,7 @@ Route::Route(const Route& orig, PacketSink& dst) : _sinklist(orig.size() + 1) {
 
 Route* Route::clone() const {
     Route* copy = new Route(_hop_count);
-    copy->set_path_id(_path_id, _no_of_paths);
+    copy->set_path_id(_pathid, _no_of_paths);
     /* don't clone the reverse path
        if (_reverse) {
        copy->_reverse = _reverse->clone();

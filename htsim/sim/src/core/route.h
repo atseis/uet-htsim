@@ -40,10 +40,10 @@ class Route {
     void set_reverse(Route* reverse) {_reverse = reverse;}
     inline const Route* reverse() const {return _reverse;}
     void set_path_id(int path_id, int no_of_paths) {
-        _path_id = path_id;
+        _pathid = path_id;
         _no_of_paths = no_of_paths;
     }
-    inline int path_id() const {return _path_id;}
+    inline int path_id() const {return _pathid;}
     inline int no_of_paths() const {return _no_of_paths;}
     inline uint32_t hop_count() const {return _hop_count;}
  private:
@@ -51,7 +51,7 @@ class Route {
     vector<PacketSink*> _sinklist;
     uint32_t _hop_count;
     Route* _reverse;
-    int _path_id; //path identifier for this path
+    int _pathid; //path identifier for this path
     int _no_of_paths; //total number of paths sender is using
 };
 //typedef vector<PacketSink*> route_t;

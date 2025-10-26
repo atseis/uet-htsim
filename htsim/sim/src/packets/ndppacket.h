@@ -163,7 +163,7 @@ public:
         p->_cumulative_ack = cumulative_ack;
         p->_pull = true;
         p->_pullno = pullno;
-        p->_path_id = path_id;
+        p->_pathid = path_id;
         p->_path_len = 0;
         p->_direction = NONE;
         p->_ecn_echo = false;
@@ -180,7 +180,7 @@ public:
     inline void set_ts(simtime_picosec ts) { _ts = ts; }
     inline bool pull() const { return _pull; }
     inline seq_t pullno() const { return _pullno; }
-    int32_t path_id() const { return _path_id; }
+    int32_t path_id() const { return _pathid; }
     inline void dont_pull() {
         _pull = false;
         _pullno = 0;
@@ -198,7 +198,7 @@ protected:
     simtime_picosec _ts;
     seq_t _pullno;
 
-    int32_t _path_id;  // see comment in NdpPull
+    // int32_t _pathid;  // see comment in NdpPull
     bool _pull;
     bool _ecn_echo;
     static PacketDB<NdpAck> _packetdb;
@@ -227,7 +227,7 @@ public:
         p->_pull = true;
         p->_direction = NONE;
         p->_pullno = pullno;
-        p->_path_id = path_id;  // used to indicate which path the data
+        p->_pathid = path_id;  // used to indicate which path the data
         // packet was trimmed on
         p->_path_len = 0;
         p->_ecn_echo = false;
@@ -244,7 +244,7 @@ public:
     inline void set_ts(simtime_picosec ts) { _ts = ts; }
     inline bool pull() const { return _pull; }
     inline seq_t pullno() const { return _pullno; }
-    int32_t path_id() const { return _path_id; }
+    int32_t path_id() const { return _pathid; }
     inline void dont_pull() {
         _pull = false;
         _pullno = 0;
@@ -261,7 +261,7 @@ protected:
     seq_t _cumulative_ack;
     simtime_picosec _ts;
     seq_t _pullno;
-    int32_t _path_id;
+    // int32_t _pathid;
     bool _pull;
     bool _ecn_echo;
     static PacketDB<NdpNack> _packetdb;
@@ -279,7 +279,7 @@ public:
         p->_is_header = true;
         p->_bounced = false;
         p->_grants = grants;
-        p->_path_id = 0;
+        p->_pathid = 0;
         p->_direction = NONE;
         p->set_dst(destination);
         return p;
@@ -297,7 +297,7 @@ public:
         p->_is_header = true;
         p->_bounced = false;
         p->_grants = grants;
-        p->_path_id = 0;
+        p->_pathid = 0;
         p->_direction = NONE;
         p->set_dst(destination);
 
@@ -307,7 +307,7 @@ public:
     void free() { _packetdb.freePacket(this); }
     inline seq_t grants() const { return _grants; }
     inline void set_grants(seq_t grants) { _grants = grants; }
-    int32_t path_id() const { return _path_id; }
+    int32_t path_id() const { return _pathid; }
 
     inline void set_ts(simtime_picosec ts) { _ts = ts; }
     virtual PktPriority priority() const { return Packet::PRIO_HI; }
@@ -317,7 +317,7 @@ public:
 protected:
     simtime_picosec _ts;
     seq_t _grants;
-    int32_t _path_id;  // indicates ??
+    // int32_t _pathid;  // indicates ??
     static PacketDB<NdpRTS> _packetdb;
 };
 
@@ -440,7 +440,7 @@ public:
     inline seq_t ackno() const { return _ackno; }
     inline seq_t cumulative_ack() const { return _cumulative_ack; }
     inline seq_t pullno() const { return _pullno; }
-    int32_t path_id() const { return _path_id; }
+    int32_t path_id() const { return _pathid; }
     virtual PktPriority priority() const { return Packet::PRIO_HI; }
 
     virtual ~NdpPull() {}
@@ -450,7 +450,7 @@ protected:
     seq_t _ackno;
     seq_t _cumulative_ack;
     seq_t _pullno;
-    int32_t _path_id;  // indicates ??
+    // int32_t _pathid;  // indicates ??
     static PacketDB<NdpPull> _packetdb;
 };
 
