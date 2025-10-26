@@ -16,3 +16,5 @@ idmap.txt
 build/
 out/
 .cache/
+*.ipynb
+*.log

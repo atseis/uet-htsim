@@ -45,7 +45,7 @@ int main(int argc, char* argv[]) {
     linkspeed_bps SERVICE1 = speedFromMbps((uint64_t)100000);
     simtime_picosec RTT1 = timeFromUs((uint32_t)1);
 
-    int flow_count = 2;
+    int flow_count = 200;
     //--------------------------------------------------
     // 模拟初始设置，包括日志的设置
     eventlist.setEndtime(end_time);

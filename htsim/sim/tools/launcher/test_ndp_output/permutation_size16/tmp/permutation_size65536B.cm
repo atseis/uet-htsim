@@ -1,0 +1,18 @@
+Nodes 16
+Connections 16
+7->5 id 1 start 0 size 65536
+9->1 id 2 start 0 size 65536
+5->13 id 3 start 0 size 65536
+6->12 id 4 start 0 size 65536
+14->2 id 5 start 0 size 65536
+10->4 id 6 start 0 size 65536
+12->15 id 7 start 0 size 65536
+8->10 id 8 start 0 size 65536
+1->6 id 9 start 0 size 65536
+2->11 id 10 start 0 size 65536
+13->3 id 11 start 0 size 65536
+15->14 id 12 start 0 size 65536
+4->0 id 13 start 0 size 65536
+11->9 id 14 start 0 size 65536
+0->8 id 15 start 0 size 65536
+3->7 id 16 start 0 size 65536

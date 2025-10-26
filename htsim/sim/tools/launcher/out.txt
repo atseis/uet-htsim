@@ -1,0 +1,140 @@
+Nodes:  128
+Connections:  128
+Flowsize:  262144 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  1048576 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  4194304 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  262144 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  1048576 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  4194304 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  262144 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  1048576 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  4194304 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Global Parameters:
+  Link speed gbps: ['200Gbps']
+  Oversubscription ratio: ['1:1']
+  Topology sizes: [128]
+  Cc algo: ['nscc', 'rccc', 'rccc+os_cc', 'nscc+rccc']
+
+Experiments:
+Experiment Name: permutation
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'nscc'} and subparameters: {'message_size_bytes': 262144}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm 128 128 262144 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_nscc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -sender_cc_only -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_nscc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'nscc'} and subparameters: {'message_size_bytes': 1048576}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm 128 128 1048576 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_nscc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -sender_cc_only -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_nscc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'nscc'} and subparameters: {'message_size_bytes': 4194304}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm 128 128 4194304 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_nscc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -sender_cc_only -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_nscc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'rccc'} and subparameters: {'message_size_bytes': 262144}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm 128 128 262144 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_rccc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 -force_disable_oversubscribed_cc > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_rccc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'rccc'} and subparameters: {'message_size_bytes': 1048576}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm 128 128 1048576 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_rccc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 -force_disable_oversubscribed_cc > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_rccc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'rccc'} and subparameters: {'message_size_bytes': 4194304}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm 128 128 4194304 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_rccc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 -force_disable_oversubscribed_cc > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_rccc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'rccc+os_cc'} and subparameters: {'message_size_bytes': 262144}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm 128 128 262144 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_rccc+os_cc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_rccc+os_cc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'rccc+os_cc'} and subparameters: {'message_size_bytes': 1048576}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm 128 128 1048576 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_rccc+os_cc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_rccc+os_cc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'rccc+os_cc'} and subparameters: {'message_size_bytes': 4194304}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm 128 128 4194304 0 42
+Nodes:  128
+Connections:  128
+Flowsize:  262144 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  1048576 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Nodes:  128
+Connections:  128
+Flowsize:  4194304 bytes
+ExtraStartTime:  0.0 us
+Random Seed  42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_rccc+os_cc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_rccc+os_cc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'nscc+rccc'} and subparameters: {'message_size_bytes': 262144}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm 128 128 262144 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_nscc+rccc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -sender_cc -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size262144B_nscc+rccc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'nscc+rccc'} and subparameters: {'message_size_bytes': 1048576}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm 128 128 1048576 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_nscc+rccc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -sender_cc -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size1048576B_nscc+rccc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+Running permutation with global parameters: {'link_speed_Gbps': '200Gbps', 'oversubscription_ratio': '1:1', 'topology_sizes': 128, 'cc_algo': 'nscc+rccc'} and subparameters: {'message_size_bytes': 4194304}
+Creating CM named python ../connection_matrices/gen_permutation.py experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm 128 128 4194304 0 42
+Executing: ../htsim_uec -tm experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B.cm -o experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_nscc+rccc_os_ratio1:1_size_topo128_link_speed200Gbps.logout.dat -end 1000000 -sender_cc -topo ../topologies/fat_tree_128_1os.topo -linkspeed 200000 > experiments/permutation_size128_osratio1:1_linkspeed200Gbps/tmp/permutation_size4194304B_nscc+rccc_os_ratio1:1_size_topo128_link_speed200Gbps.out
+     Experiment     Size  ... Degraded                            Group
+0   permutation   262144  ...     None   permutation_262144_degradeNone
+1   permutation  1048576  ...     None  permutation_1048576_degradeNone
+2   permutation   262144  ...     None   permutation_262144_degradeNone
+3   permutation  4194304  ...     None  permutation_4194304_degradeNone
+4   permutation  4194304  ...     None  permutation_4194304_degradeNone
+5   permutation  1048576  ...     None  permutation_1048576_degradeNone
+6   permutation  1048576  ...     None  permutation_1048576_degradeNone
+7   permutation  1048576  ...     None  permutation_1048576_degradeNone
+8   permutation  4194304  ...     None  permutation_4194304_degradeNone
+9   permutation  4194304  ...     None  permutation_4194304_degradeNone
+10  permutation   262144  ...     None   permutation_262144_degradeNone
+11  permutation   262144  ...     None   permutation_262144_degradeNone
+
+[12 rows x 8 columns]
+permutation_262144_degradeNone
+
+permutation_1048576_degradeNone
+
+permutation_4194304_degradeNone
+
+     Experiment     Size  ... Degraded                            Group
+0   permutation   262144  ...     None   permutation_262144_degradeNone
+2   permutation   262144  ...     None   permutation_262144_degradeNone
+10  permutation   262144  ...     None   permutation_262144_degradeNone
+11  permutation   262144  ...     None   permutation_262144_degradeNone
+1   permutation  1048576  ...     None  permutation_1048576_degradeNone
+5   permutation  1048576  ...     None  permutation_1048576_degradeNone
+6   permutation  1048576  ...     None  permutation_1048576_degradeNone
+7   permutation  1048576  ...     None  permutation_1048576_degradeNone
+3   permutation  4194304  ...     None  permutation_4194304_degradeNone
+4   permutation  4194304  ...     None  permutation_4194304_degradeNone
+8   permutation  4194304  ...     None  permutation_4194304_degradeNone
+9   permutation  4194304  ...     None  permutation_4194304_degradeNone
+
+[12 rows x 8 columns]
