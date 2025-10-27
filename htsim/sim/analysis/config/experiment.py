@@ -1,17 +1,25 @@
 from ..runner import BUILD_DIR, PROJECT_DIR
-import yaml, itertools, subprocess, os
+import yaml, itertools, subprocess, os, sys, datetime
 from typing import Dict, Any, List
 from pathlib import Path
-import yaml
-from . import traffic_patterns
-from ..runner import PROJECT_DIR, run_sim
+from . import traffic_patterns, status
+from ..runner import run_sim
+
+# === 新增 rich 进度条支持 ===
+from rich.progress import (
+    Progress,
+    TextColumn,
+    BarColumn,
+    MofNCompleteColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+from rich.console import Console
+
+console = Console()
 
 
-# 定义项目根目录
-from typing import Dict, Any, List
-from . import traffic_patterns
-from ..runner import BUILD_DIR, PROJECT_DIR, run_sim
-import yaml
+# === 工具函数 ===
 
 
 def deep_merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
@@ -48,7 +56,7 @@ def expand_params_tree(params: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def build_flags(params: Dict[str, Any]) -> List[str]:
-    """将字典转换为命令行参数列表 [-k v ...]，忽略列表/字典类型"""
+    """将字典转换为命令行参数列表 [-k v ...]"""
     flags: List[str] = []
     for k, v in params.items():
         if k == "log" and isinstance(v, list):
@@ -64,10 +72,7 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
 
 
 def generate_traffic(traffic_params: Dict[str, Any], common_config: Dict[str, Any]):
-    """
-    根据合并后的参数生成连接矩阵文件
-    """
-    # 若存在嵌套的 params，则将其平铺到顶层
+    """根据合并后的参数生成连接矩阵文件"""
     nested = (
         traffic_params.get("params", {})
         if isinstance(traffic_params.get("params"), dict)
@@ -82,7 +87,7 @@ def generate_traffic(traffic_params: Dict[str, Any], common_config: Dict[str, An
     if not traffic_type:
         raise ValueError("traffic.type 未指定")
 
-    # 默认与别名处理
+    # 默认参数
     nodes = traffic_params.get("nodes", common_config.get("nodes", 16))
     conns = traffic_params.get("conns", traffic_params.get("flows", 16))
     groupsize = traffic_params.get("groupsize", 16)
@@ -95,40 +100,42 @@ def generate_traffic(traffic_params: Dict[str, Any], common_config: Dict[str, An
     conns_incast = traffic_params.get("conns_incast", 8)
     conns_outcast = traffic_params.get("conns_outcast", 8)
 
+    # 流量类型分派
+    tp = traffic_patterns
     if traffic_type == "allreduce":
-        cm_file = traffic_patterns.generate_allreduce_traffic(
+        cm_file = tp.generate_allreduce_traffic(
             nodes, conns, groupsize, flowsize, locality, randseed
         )
     elif traffic_type == "allreduce_butterfly":
-        cm_file = traffic_patterns.generate_allreduce_butterfly_traffic(
+        cm_file = tp.generate_allreduce_butterfly_traffic(
             nodes, groups, groupsize, flowsize, locality, randseed
         )
     elif traffic_type == "serial_alltoall":
-        cm_file = traffic_patterns.generate_serial_alltoall_traffic(
+        cm_file = tp.generate_serial_alltoall_traffic(
             nodes, conns, groupsize, flowsize, extrastarttime, randseed
         )
     elif traffic_type == "incast":
-        cm_file = traffic_patterns.generate_incast_traffic(
+        cm_file = tp.generate_incast_traffic(
             nodes, conns, flowsize, extrastarttime, randseed
         )
     elif traffic_type == "outcast_incast":
-        cm_file = traffic_patterns.generate_outcast_incast_traffic(
+        cm_file = tp.generate_outcast_incast_traffic(
             nodes, conns_incast, conns_outcast, flowsize, randseed
         )
     elif traffic_type == "permutation":
-        cm_file = traffic_patterns.generate_permutation_traffic(
+        cm_file = tp.generate_permutation_traffic(
             nodes, conns, flowsize, extrastarttime, randseed
         )
     elif traffic_type == "permutation_full_bisection":
-        cm_file = traffic_patterns.generate_permutation_full_bisection_traffic(
+        cm_file = tp.generate_permutation_full_bisection_traffic(
             nodes, conns, flowsize, extrastarttime, randseed
         )
     elif traffic_type == "serialn_alltoall":
-        cm_file = traffic_patterns.generate_serialn_alltoall_traffic(
+        cm_file = tp.generate_serialn_alltoall_traffic(
             nodes, conns, groupsize, parallel, flowsize, extrastarttime, randseed
         )
     elif traffic_type == "serialn_alltoall_prio":
-        cm_file = traffic_patterns.generate_serialn_alltoall_prio_traffic(
+        cm_file = tp.generate_serialn_alltoall_prio_traffic(
             nodes, conns, groupsize, parallel, flowsize, extrastarttime, randseed
         )
     else:
@@ -137,10 +144,28 @@ def generate_traffic(traffic_params: Dict[str, Any], common_config: Dict[str, An
     return cm_file
 
 
-def run_experiment(config: Dict[str, Any]):
-    """
-    运行实验：先展开参数组合（流量+模拟），再分别执行流量生成与模拟
-    """
+def identify_variable_keys(all_variants: List[Dict[str, Any]]) -> List[str]:
+    """识别所有变体中变化的键"""
+    if not all_variants:
+        return []
+    variable_keys = {"name"}
+    all_keys = {k for v in all_variants for k in v}
+    for key in all_keys:
+        values = {str(v.get(key)) for v in all_variants}
+        if len(values) > 1:
+            variable_keys.add(key)
+    return sorted(list(variable_keys))
+
+
+# === 主体函数 ===
+
+
+def run_experiment(
+    config: Dict[str, Any],
+    config_file_path: str,
+    force_rerun: bool = False,
+    continue_on_error: bool = False,
+):
     common = config.get("common", {})
     common_traffic = common.get("traffic", {})
     common_sim = common.get("simulation", {})
@@ -148,94 +173,217 @@ def run_experiment(config: Dict[str, Any]):
         k: v for k, v in common.items() if k not in ("traffic", "simulation")
     }
 
-    experiments = config.get("experiments", [])
-    for exp in experiments:
-        exp_name = exp.get("name", "exp")
-        exe_name = exp.get("exe")
-        if not exe_name:
-            raise ValueError(f"实验 {exp_name} 缺少 exe 字段")
-        exe = exe_name  # runner.run_sim 会在 BUILD_DIR 下寻找该二进制
-        protocol = exp.get("protocol")
-        execute = exp.get("execute", common.get("execute", False))
+    experiments_dir = PROJECT_DIR / "experiments"
+    results_base_dir = PROJECT_DIR / "results"
 
-        # 从 common_flat 中移除 execute 字段，因为它不应该作为模拟器参数传递
-        if "execute" in common_flat:
-            del common_flat["execute"]
+    config_file_path_obj = Path(config_file_path).resolve()
+    relative_path = config_file_path_obj.relative_to(experiments_dir)
+    output_dir_name = relative_path.with_suffix("").as_posix()
+    current_exp_results_dir = results_base_dir / output_dir_name
+    current_exp_results_dir.mkdir(parents=True, exist_ok=True)
+
+    batch_log_path = current_exp_results_dir / "batch_summary.log"
+    with open(batch_log_path, "w") as bf:
+        bf.write(f"Batch started at {datetime.datetime.now()}\n")
+
+    # === 展开参数组合 ===
+    experiments = config.get("experiments", [])
+    all_exp_variants = []
+    for exp_idx, exp in enumerate(experiments):
+        exp_name = exp.get("name", f"exp_{exp_idx}")
+        base_traffic = deep_merge(common_traffic, exp.get("traffic", {}))
+        base_sim = deep_merge(common_sim, exp.get("simulation", {}))
+        for t_var in expand_params_tree(base_traffic):
+            for s_var in expand_params_tree(base_sim):
+                all_exp_variants.append(
+                    {**common_flat, **t_var, **s_var, "name": exp_name}
+                )
+
+    variable_keys = identify_variable_keys(all_exp_variants)
+
+    # === 构建任务列表 ===
+    planned_tasks = []
+    for exp_idx, exp in enumerate(experiments):
+        exp_name = exp.get("name", f"exp_{exp_idx}")
+        exe = exp.get("exe")
+        if not exe:
+            raise ValueError(f"实验 {exp_name} 缺少 exe 字段")
+        execute = exp.get("execute", common.get("execute", False))
 
         base_traffic = deep_merge(common_traffic, exp.get("traffic", {}))
         base_sim = deep_merge(common_sim, exp.get("simulation", {}))
-
         traffic_variants = expand_params_tree(base_traffic)
         sim_variants = expand_params_tree(base_sim)
 
         for t_var in traffic_variants:
-            # 生成 CM 文件
-            cm_file = generate_traffic(t_var, common)
             for s_var in sim_variants:
-                # 仿真参数：合并 common 的非 traffic/simulation 字段
-                sim_params = s_var
-                # 确保 execute 不作为模拟器参数传递
-                if "execute" in sim_params:
-                    del sim_params["execute"]
-                if "conns" in sim_params:
-                    del sim_params["conns"]
-                flags = build_flags({**common_flat, **sim_params, "tm": cm_file})
+                label_parts = []
+                for key in variable_keys:
+                    val = {**t_var, **s_var}.get(key)
+                    if val is not None and not isinstance(val, dict):
+                        label_parts.append(f"{key}{val}")
+                label_suffix = "_".join(label_parts) or "default"
 
-                # 输出名称包含当前组合关键信息
-                def flatten_for_label(d: Dict[str, Any]) -> List[str]:
-                    items: List[str] = []
-                    for k, v in d.items():
-                        if isinstance(v, dict):
-                            # 将嵌套键平铺
-                            for sk, sv in v.items():
-                                if not isinstance(sv, (list, dict)):
-                                    items.append(f"{sk}{sv}")
-                        elif not isinstance(v, (list, dict)):
-                            items.append(f"{k}{v}")
-                    return items
+                out_name = current_exp_results_dir / label_suffix
+                out_name.mkdir(parents=True, exist_ok=True)
+                status_file = out_name / "status.yaml"
 
-                label_parts: List[str] = flatten_for_label(s_var) + flatten_for_label(
-                    t_var
+                planned_tasks.append(
+                    {
+                        "exp_name": exp_name,
+                        "exe": exe,
+                        "execute": execute,
+                        "t_var": t_var,
+                        "s_var": s_var,
+                        "label_suffix": label_suffix,
+                        "out_name": out_name,
+                        "status_file": status_file,
+                    }
                 )
-                label_suffix = "_".join(label_parts) if label_parts else "default"
-                prefix = f"{exp_name}_" + (f"{protocol}_" if protocol else "")
-                out_name = f"{prefix}{label_suffix}"
 
-                if execute:
-                    run_sim(exe, flags + ["-o", out_name])
+    total_count = len(planned_tasks)
+    done = success = failed = skipped = 0
+    durations: List[float] = []
+    last_error = ""
+
+    # === 检查可跳过任务 ===
+    to_run = []
+    for task in planned_tasks:
+        if not status.should_run(task["status_file"], force_rerun):
+            skipped += 1
+            done += 1
+            with open(batch_log_path, "a") as bf:
+                bf.write(f"⚠ [SKIP] {task['label_suffix']}\n")
+        else:
+            to_run.append(task)
+
+    console.print(
+        f"[bold cyan]开始运行批量实验（共 {total_count} 项，跳过 {skipped} 项）[/bold cyan]"
+    )
+
+    # === Rich 进度条主循环 ===
+    with Progress(
+        TextColumn("[bold blue]{task.fields[status]}[/bold blue]"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TextColumn("{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        TextColumn(
+            "✔ {task.fields[success]} ✘ {task.fields[failed]} ⚠ {task.fields[skipped]}"
+        ),
+        console=console,
+        transient=False,
+        refresh_per_second=2,
+    ) as progress:
+        tid = progress.add_task(
+            "[green]Running experiments...",
+            total=total_count,
+            status="",
+            success=success,
+            failed=failed,
+            skipped=skipped,
+            completed=skipped,
+        )
+
+        for task in to_run:
+            label = task["label_suffix"]
+            progress.update(tid, status=f"[cyan]{label}[/cyan]")
+            start_time = datetime.datetime.now()
+
+            try:
+                cm_file = generate_traffic(task["t_var"], common)
+                sim_params = dict(task["s_var"])
+                sim_params.pop("execute", None)
+                effective_common = dict(common_flat)
+                effective_common.pop("execute", None)
+                sim_params.pop("conns", None)
+
+                flags = build_flags({**effective_common, **sim_params, "tm": cm_file})
+                full_command = f"{task['exe']} {' '.join(flags)} -o {(task['out_name'] / 'output.log').as_posix()}"
+                status.initialize_status(task["status_file"], full_command, label)
+
+                if task["execute"]:
+                    run_result = run_sim(
+                        task["exe"],
+                        flags + ["-o", (task["out_name"] / "output.log").as_posix()],
+                    )
+                    end_time = datetime.datetime.now()
+                    dur = (end_time - start_time).total_seconds()
+                    durations.append(dur)
+                    if run_result["exit_code"] == 0:
+                        success += 1
+                        status.update_status(
+                            task["status_file"],
+                            "success",
+                            exit_code=0,
+                            duration_sec=dur,
+                        )
+                    else:
+                        failed += 1
+                        last_error = f"{label} → exit {run_result['exit_code']}"
+                        status.update_status(
+                            task["status_file"],
+                            "failed",
+                            exit_code=int(run_result["exit_code"]),
+                            duration_sec=dur,
+                            error_log=str(run_result["stderr"]),
+                        )
+                        if not continue_on_error:
+                            progress.console.print(f"[red]终止：{last_error}[/red]")
+                            break
                 else:
-                    print(f"[Run] {exe} {' '.join(flags)} -o {out_name}")
+                    success += 1
+                    status.update_status(
+                        task["status_file"], "success", error_log="Dry run"
+                    )
+
+                done += 1
+
+            except Exception as e:
+                failed += 1
+                done += 1
+                last_error = str(e)
+                progress.console.print(f"[red]任务 {label} 出错: {e}[/red]")
+                if not continue_on_error:
+                    break
+
+            progress.update(
+                tid, advance=1, success=success, failed=failed, skipped=skipped
+            )
+
+    console.print(
+        f"\n[bold green]✔ 成功:[/bold green] {success}  [red]✘ 失败:[/red] {failed}  [yellow]⚠ 跳过:[/yellow] {skipped}"
+    )
+    console.print(f"[dim]详细日志: {batch_log_path.as_posix()}[/dim]")
 
 
 def load_config(config_file: str) -> Dict[str, Any]:
-    """
-    加载YAML配置文件
-
-    参数:
-        config_file: 配置文件路径
-
-    返回:
-        Dict[str, Any]: 配置字典
-    """
     with open(config_file, "r") as f:
         return yaml.safe_load(f)
 
 
-def main(config_file: str):
-    """
-    主函数，加载配置并运行实验
-
-    参数:
-        config_file: 配置文件路径
-    """
-    config = load_config(config_file)
-    run_experiment(config)
+def main(
+    config_file_path: str, force_rerun: bool = False, continue_on_error: bool = False
+):
+    config = load_config(config_file_path)
+    run_experiment(config, config_file_path, force_rerun, continue_on_error)
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    if len(sys.argv) > 1:
-        main(sys.argv[1])
-    else:
-        print("Usage: python experiment.py <config_file>")
+    parser = argparse.ArgumentParser(description="Run network simulation experiments.")
+    parser.add_argument("config_file", help="Path to the YAML configuration file.")
+    parser.add_argument(
+        "--force", action="store_true", help="Force rerun of all experiments."
+    )
+    parser.add_argument(
+        "--continue",
+        dest="continue_on_error",
+        action="store_true",
+        help="Continue on error.",
+    )
+    args = parser.parse_args()
+
+    main(args.config_file, args.force, args.continue_on_error)

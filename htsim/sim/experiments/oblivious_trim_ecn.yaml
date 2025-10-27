@@ -19,6 +19,14 @@ common:
     logtime: 0.01
 
 experiments:
+  - name: test
+    exe: htsim_ndp
+    protocol: ndp # 添加 protocol 字段
+    simulation:
+      strat: wrontstrat
+      paths: [256, 32]
+      q: [1000] # 对于 ecmp_host_ecn，q 仅为 1000
+      ecn_thresh: [0.018]
   - name: oblivious_trim_ecn_ecmp
     exe: htsim_ndp
     protocol: ndp # 添加 protocol 字段

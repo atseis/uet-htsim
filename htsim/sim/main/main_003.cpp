@@ -189,6 +189,10 @@ int main(int argc, char* argv[]) {
         ndp_srcs.push_back(ndpSrc);
         ndpSrc->set_dst(dst);
         ndpSrc->set_path_burst(path_burst);
+
+        if (log_flow_events) {
+            ndpSrc->logFlowEvents(*event_logger);
+        }
         if (crt->flowid) {
             ndpSrc->set_flowid(crt->flowid);
             assert(flowmap.find(crt->flowid) == flowmap.end());  // ensure no dup flows

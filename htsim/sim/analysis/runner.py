@@ -142,24 +142,51 @@ def run_parse(logfile: str, flags: list = ["-ascii"]) -> str:
         raise RuntimeError(f"FAILED RUNNING parse_output:\n{e.stderr}") from e
 
 
-def run_sim(bin: str, flags: list = []) -> str:
+def run_sim(bin: str, flags: list = []) -> Dict[str, Union[str, int]]:
     bin_full = BUILD_DIR / bin
     if not bin_full.is_file():
-        raise FileNotFoundError(f"binary NOT FOUND: {bin_full.as_posix()}")
+        return {
+            "stdout": "",
+            "stderr": f"binary NOT FOUND: {bin_full.as_posix()}",
+            "exit_code": 1,
+            "command": " ".join([bin_full.as_posix()] + flags),
+        }
     cmd = [bin_full.as_posix()]
     if flags:
         cmd.extend(flags)
+    command_str = " ".join(cmd)
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        return result.stdout
+        return {
+            "stdout": result.stdout,
+            "stderr": "",
+            "exit_code": 0,
+            "command": command_str,
+        }
     except subprocess.CalledProcessError as e:
         with open(error_log_file, "a") as f:
             cur_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            command_str = " ".join(cmd)
             log_entry = f"[{cur_time}] Command failed: {command_str}\nError: {bin_full.as_posix()}:\n{e.stderr}\n"
             f.write(log_entry)
             print(f"Error written to: {error_log_file}")
-        raise RuntimeError(f"FAILED RUNNING {bin_full.as_posix()}:\n{e.stderr}") from e
+        return {
+            "stdout": e.stdout,
+            "stderr": e.stderr,
+            "exit_code": e.returncode,
+            "command": command_str,
+        }
+    except Exception as e:
+        with open(error_log_file, "a") as f:
+            cur_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_entry = f"[{cur_time}] Command failed with unexpected error: {command_str}\nError: {str(e)}\n"
+            f.write(log_entry)
+            print(f"Error written to: {error_log_file}")
+        return {
+            "stdout": "",
+            "stderr": str(e),
+            "exit_code": 1,
+            "command": command_str,
+        }
 
 
 # 以下是针对特定分析场景的辅助函数
