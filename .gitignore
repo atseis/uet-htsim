@@ -21,4 +21,3 @@ output/
 *.ipynb
 *.log
 htsim/sim/results/
-htsim/sim/experiments/

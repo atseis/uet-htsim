@@ -1,0 +1,29 @@
+common:
+  execute: False
+  traffic:
+    type: permutation
+    params:
+      flowsize: "2MB"
+  simulation:
+    log:
+      - sink
+      - flow_events
+    linkspeed: 100000
+    q: 35
+    cwnd: 50
+    mtu: 4000
+    end: 1500
+    strat: ecmp
+
+experiments:
+  - name: spray_comparison
+    exe: htsim_ndp
+    protocol: ndp
+    traffic:
+      params:
+        randseed: [13,14,15,16,17]
+    simulation:
+      nodes: [432, 1024, 2000, 3456, 8192, 16000]
+      paths: [1,8,16,32,64,128,256]
+      
+
