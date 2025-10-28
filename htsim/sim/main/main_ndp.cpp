@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     simtime_picosec switch_latency = timeFromUs((uint32_t)0);
     queue_type qt = COMPOSITE;
 
-    bool log_flow_events = true;
+    bool log_flow_events = false;
     bool log_sink = false;
     bool rts = false;
     bool log_tor_downqueue = false;
@@ -181,8 +181,7 @@ int main(int argc, char** argv) {
         } else if (!strcmp(argv[i], "-log")) {
             if (!strcmp(argv[i + 1], "flow_events")) {
                 log_flow_events = true;
-            } else if (!strcmp(argv[i + 1], "sink")) {
-                log_sink = true;
+                cout << "logging flow events\n";
             } else if (!strcmp(argv[i + 1], "sink")) {
                 cout << "logging sinks\n";
                 log_sink = true;

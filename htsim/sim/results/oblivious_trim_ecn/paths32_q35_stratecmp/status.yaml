@@ -1,12 +1,12 @@
-command: htsim_ndp -log sink -linkspeed 100000 -nodes 16 -cwnd 50 -mtu 4000 -end 300
-  -logtime 0.01 -strat ecmp -paths 32 -q 35 -tm /root/code/uet-htsim/htsim/sim/data/connection_matrices/perm_16n_16c_2MB.cm
+command: htsim_ndp -log sink -log flow_events -linkspeed 100000 -nodes 16 -cwnd 50
+  -mtu 4000 -end 300 -logtime 0.01 -strat ecmp -paths 32 -q 35 -tm /root/code/uet-htsim/htsim/sim/data/connection_matrices/perm_16n_16c_2MB.cm
   -o /root/code/uet-htsim/htsim/sim/results/oblivious_trim_ecn/paths32_q35_stratecmp/output.log
-duration_sec: 0.424923
+duration_sec: 0.43213
 end_time: null
 error_log: ''
 exit_code: 0
-git_commit: 2590e7051cbb1f12fec476e6ca7bb89e88beca62
+git_commit: b790e07fafa448ba5d0419d78a0999f175c062fb
 id: paths32_q35_stratecmp
 rerun_count: 0
-start_time: 2025-10-27_08-06-20
+start_time: 2025-10-27_16-28-14
 status: success

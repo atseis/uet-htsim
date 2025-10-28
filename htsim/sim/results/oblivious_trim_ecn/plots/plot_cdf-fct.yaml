@@ -1,0 +1,17 @@
+generated_from: oblivious_trim_ecn.yaml
+generated_time: '2025-10-27T16:28:16.577743'
+plot_type: cdf-fct
+sources:
+- oblivious_trim_ecn/paths32_q1000_stratecmp
+- oblivious_trim_ecn/paths256_q1000_stratecmp
+- oblivious_trim_ecn/paths32_q35_stratecmp
+- oblivious_trim_ecn/ecn_thresh0.018_paths32_q1000_stratecmp_host_ecn
+- oblivious_trim_ecn/paths256_q35_stratecmp
+- oblivious_trim_ecn/ecn_thresh0.018_paths256_q1000_stratecmp_host_ecn
+title: Flow Completion Time CDF
+x_label: FCT (ms)
+y_label: CDF
+output_format: png
+legend_loc: lower right
+grid: true
+output: results/oblivious_trim_ecn/plots/cdf-fct.png

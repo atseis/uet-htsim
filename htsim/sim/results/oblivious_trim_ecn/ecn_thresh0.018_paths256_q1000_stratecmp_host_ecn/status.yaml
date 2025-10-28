@@ -1,12 +1,13 @@
-command: htsim_ndp -log sink -linkspeed 100000 -nodes 16 -cwnd 50 -mtu 4000 -end 300
-  -logtime 0.01 -strat ecmp_host_ecn -paths 256 -q 1000 -ecn_thresh 0.018 -tm /root/code/uet-htsim/htsim/sim/data/connection_matrices/perm_16n_16c_2MB.cm
+command: htsim_ndp -log sink -log flow_events -linkspeed 100000 -nodes 16 -cwnd 50
+  -mtu 4000 -end 300 -logtime 0.01 -strat ecmp_host_ecn -paths 256 -q 1000 -ecn_thresh
+  0.018 -tm /root/code/uet-htsim/htsim/sim/data/connection_matrices/perm_16n_16c_2MB.cm
   -o /root/code/uet-htsim/htsim/sim/results/oblivious_trim_ecn/ecn_thresh0.018_paths256_q1000_stratecmp_host_ecn/output.log
-duration_sec: 0.72187
+duration_sec: 0.715803
 end_time: null
 error_log: ''
 exit_code: 0
-git_commit: 2590e7051cbb1f12fec476e6ca7bb89e88beca62
+git_commit: b790e07fafa448ba5d0419d78a0999f175c062fb
 id: ecn_thresh0.018_paths256_q1000_stratecmp_host_ecn
 rerun_count: 0
-start_time: 2025-10-27_08-06-21
+start_time: 2025-10-27_16-28-15
 status: success

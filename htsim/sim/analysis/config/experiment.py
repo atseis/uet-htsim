@@ -4,6 +4,8 @@ from typing import Dict, Any, List
 from pathlib import Path
 from . import traffic_patterns, status
 from ..runner import run_sim
+from ..viz import plot_generator
+from ..viz import plot_from_yaml
 
 # === 新增 rich 进度条支持 ===
 from rich.progress import (
@@ -356,6 +358,30 @@ def run_experiment(
         f"\n[bold green]✔ 成功:[/bold green] {success}  [red]✘ 失败:[/red] {failed}  [yellow]⚠ 跳过:[/yellow] {skipped}"
     )
     console.print(f"[dim]详细日志: {batch_log_path.as_posix()}[/dim]")
+
+    # === 自动生成图表 ===
+    if "plot" in config:
+        console.print("\n[bold magenta]开始自动生成图表...[/bold magenta]")
+        try:
+            # 生成绘图配置文件并自动生成图表
+            plot_config_paths = plot_generator.write_plot_configs(config_file_path)
+            if not plot_config_paths:
+                console.print("未找到需要生成的图表配置。")
+            else:
+                console.print(f"已生成 {len(plot_config_paths)} 个绘图配置文件。")
+
+                # 遍历并生成图表
+                for plot_config_path in plot_config_paths:
+                    console.print(f"正在生成图表: {plot_config_path}...")
+                    try:
+                        plot_from_yaml.plot_from_config(plot_config_path)
+                    except Exception as e:
+                        console.print(f"[red]生成图表 {plot_config_path} 失败: {e}[/red]")
+                console.print("图表自动生成完成。")
+        except Exception as e:
+            console.print(f"[red]自动生成图表过程出错: {e}[/red]")
+    else:
+        console.print("\n[dim]实验配置中未指定 'plot' 字段，跳过自动生成图表。[/dim]")
 
 
 def load_config(config_file: str) -> Dict[str, Any]:
