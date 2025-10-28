@@ -9,6 +9,7 @@ import os
 import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from ..runner import PROJECT_DIR
 
 # 绘图类型及其默认配置
 PLOT_TEMPLATES = {
@@ -19,6 +20,8 @@ PLOT_TEMPLATES = {
         "output_format": "png",
         "legend_loc": "lower right",
         "grid": True,
+        "x_range_auto": False, # 新增：是否自动识别X轴范围
+        "x_range_manual": None, # 新增：手动指定X轴范围 [min, max]
     },
     "throughput": {
         "title": "Throughput Comparison",
@@ -76,9 +79,9 @@ def generate_plot_config(
     if results_dir is None:
         # 从实验YAML路径推断结果目录
         experiment_path = Path(experiment_yaml_path).resolve()
-        experiment_name = experiment_path.stem
-        project_dir = Path(experiment_yaml_path).parent.parent  # 假设YAML在experiments/目录下
-        results_dir = project_dir / "results" / experiment_name
+        relative_path = experiment_path.relative_to(PROJECT_DIR / "experiments")
+        output_dir_name = relative_path.with_suffix("").as_posix()
+        results_dir = PROJECT_DIR / "results" / output_dir_name
 
     # 确定输出目录
     if output_dir is None:
@@ -94,13 +97,26 @@ def generate_plot_config(
 
     # 创建绘图配置
     plot_config = {
-        "generated_from": os.path.basename(experiment_yaml_path),
+        "generated_from": str(Path(experiment_yaml_path).resolve()),
         "generated_time": datetime.datetime.now().isoformat(),
         "plot_type": plot_type,
-        "sources": [str(variant.relative_to(results_dir.parent)) for variant in experiment_variants],
+        "sources": [
+            {
+                "path": str(variant.relative_to(PROJECT_DIR / "results")),
+                "name": variant.name  # 默认使用目录名作为名称
+            }
+            for variant in experiment_variants
+        ],
         **PLOT_TEMPLATES[plot_type],
         "output": str(output_dir / f"{plot_type}.{PLOT_TEMPLATES[plot_type]['output_format']}")
     }
+
+    # 从实验配置中获取绘图设置并覆盖默认值
+    plot_settings = experiment_config.get("plot_settings", {})
+    if "x_range_auto" in plot_settings:
+        plot_config["x_range_auto"] = plot_settings["x_range_auto"]
+    if "x_range_manual" in plot_settings:
+        plot_config["x_range_manual"] = plot_settings["x_range_manual"]
 
     return plot_config
 
@@ -150,9 +166,9 @@ def write_plot_configs(experiment_yaml_path: str, output_dir: Optional[Path] = N
     # 确定输出目录
     if output_dir is None:
         experiment_path = Path(experiment_yaml_path).resolve()
-        experiment_name = experiment_path.stem
-        project_dir = Path(experiment_yaml_path).parent.parent  # 假设YAML在experiments/目录下
-        output_dir = project_dir / "results" / experiment_name / "plots"
+        relative_path = experiment_path.relative_to(PROJECT_DIR / "experiments")
+        output_dir_name = relative_path.with_suffix("").as_posix()
+        output_dir = PROJECT_DIR / "results" / output_dir_name / "plots"
         output_dir.mkdir(parents=True, exist_ok=True)
 
     # 写入配置文件

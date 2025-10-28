@@ -46,8 +46,15 @@ def plot_cdf_fct(config: Dict[str, Any]) -> str:
     dfs = []
     labels = []
 
-    for source in sources:
-        source_path = results_dir / source
+    for source_item in sources:
+        source_path_str = source_item.get("path")
+        source_name = source_item.get("name")
+
+        if not source_path_str:
+            print(f"警告: source_item 中未指定 path: {source_item}")
+            continue
+
+        source_path = PROJECT_DIR / "results" / source_path_str
         if not source_path.exists():
             print(f"警告: 源目录不存在: {source_path}")
             continue
@@ -57,7 +64,7 @@ def plot_cdf_fct(config: Dict[str, Any]) -> str:
             print(f"警告: 未找到输出文件: {source_path}")
             continue
 
-        # 处理每个输出文件
+        # 处理每个输出文件(指日志文件)
         for output_file in output_files:
             try:
                 # 解析流信息
@@ -71,7 +78,7 @@ def plot_cdf_fct(config: Dict[str, Any]) -> str:
                     continue
 
                 # 添加到数据集
-                variant_name = output_file.parent.name
+                variant_name = source_name if source_name else output_file.parent.name
                 fct_df["variant"] = variant_name
                 dfs.append(fct_df)
                 if variant_name not in labels:
@@ -90,6 +97,8 @@ def plot_cdf_fct(config: Dict[str, Any]) -> str:
     title = config.get("title", "Flow Completion Time CDF")
     x_label = config.get("x_label", "FCT (ms)")
     y_label = config.get("y_label", "CDF")
+    x_range_auto = config.get("x_range_auto", False)
+    x_range_manual = config.get("x_range_manual", None)
 
     # 调用现有的CDF绘图函数
     cdf.plot_multiple_fct_cdf(
@@ -99,6 +108,8 @@ def plot_cdf_fct(config: Dict[str, Any]) -> str:
         title=title,
         x_label=x_label,
         y_label=y_label,
+        x_range_auto=x_range_auto,
+        x_range_manual=x_range_manual,
     )
     print(f"已保存FCT CDF图表: {output_path}")
 

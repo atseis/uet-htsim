@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Union
 
 
 def plot_fct_cdf(
@@ -72,6 +72,8 @@ def plot_multiple_fct_cdf(
     convert_to_ms: bool = True,
     x_cut_percentile: float = 99.9,  # 裁剪横轴范围到 99.9% 分位
     show_stats: bool = True,  # 是否打印每组统计
+    x_range_auto: bool = False, # 新增：是否自动识别X轴范围
+    x_range_manual: Optional[List[Union[int, float]]] = None, # 新增：手动指定X轴范围 [min, max]
 ) -> None:
     """
     绘制多个实验的流完成时间(FCT)累积分布函数(CDF)对比图
@@ -135,7 +137,22 @@ def plot_multiple_fct_cdf(
     plt.xlabel(x_label)
     plt.ylabel(y_label)
     plt.ylim(0, 1.05)
-    plt.xlim(left=0, right=max_cut_value)
+
+    if x_range_manual:
+        plt.xlim(left=x_range_manual[0], right=x_range_manual[1])
+    elif x_range_auto:
+        # 自动识别范围，可以根据实际数据进行微调
+        all_fct_values = np.concatenate([df["fct_ns"].to_numpy(dtype=np.float64) / 1e6 for df in dfs if not df.empty])
+        if len(all_fct_values) > 0:
+            min_val = np.min(all_fct_values)
+            max_val = np.max(all_fct_values)
+            # 稍微扩展一下范围，避免数据点正好在边界上
+            plt.xlim(left=min_val * 0.9, right=max_val * 1.1)
+        else:
+            plt.xlim(left=0, right=max_cut_value)
+    else:
+        plt.xlim(left=0, right=max_cut_value)
+
     plt.legend(loc="lower right", fontsize=10)
     plt.tight_layout()
 
