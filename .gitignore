@@ -13,9 +13,12 @@ idmap.txt
 *.pdf
 *.png
 !example_validate.json
+bin/
 build/
 out/
+output/
 .cache/
 *.ipynb
 *.log
 htsim/sim/results/
+htsim/sim/experiments/
