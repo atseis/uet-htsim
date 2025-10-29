@@ -34,36 +34,6 @@ def deep_merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-# def expand_params_tree(params: Dict[str, Any]) -> List[Dict[str, Any]]:
-#     """笛卡尔积：递归展开任意层级的 list 值，生成参数组合列表"""
-#     if not params:
-#         return [{}]
-#     combos: List[Dict[str, Any]] = [{}]
-#     for key, val in params.items():
-#         new_combos: List[Dict[str, Any]] = []
-#         if key == "params" and isinstance(val, list):
-#             for base in combos:
-#                 for v in val:
-#                     if isinstance(v, dict):
-#                         new_combos.append({**base, **v})
-#                     else:
-#                         new_combos.append({**base, key: v})
-#         elif isinstance(val, dict):
-#             subvariants = expand_params_tree(val)
-#             for base in combos:
-#                 for sub in subvariants:
-#                     new_combos.append({**base, key: sub})
-#         elif isinstance(val, list) and key != "log":
-#             for base in combos:
-#                 for v in val:
-#                     new_combos.append({**base, key: v})
-#         else:
-#             for base in combos:
-#                 new_combos.append({**base, key: val})
-#         combos = new_combos
-#     return combos
-
-
 def expand_params_tree(params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """展开参数字典，其中允许 params 是“参数组的组合组合”"""
     if not params:
@@ -364,9 +334,7 @@ def run_experiment(
                 nodes, conns = task["t_var"]["nodes"], task["t_var"]["conns"]
 
                 # flags = build_flags({**effective_common, **sim_params, "tm": cm_file})
-                flags = build_flags(
-                    {**sim_params, "nodes": nodes, "conns": conns, "tm": cm_file}
-                )
+                flags = build_flags({**sim_params, "nodes": nodes, "tm": cm_file})
                 full_command = f"{task['exe']} {' '.join(flags)} -o {(task['out_name'] / 'output.log').as_posix()}"
                 status.initialize_status(task["status_file"], full_command, label)
 
