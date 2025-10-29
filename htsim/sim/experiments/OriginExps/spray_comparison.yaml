@@ -1,5 +1,5 @@
 common:
-  execute: False
+  execute: True
   traffic:
     type: permutation
     flowsize: "2MB"

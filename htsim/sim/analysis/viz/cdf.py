@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
-from typing import Optional, Tuple, List, Union
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 
 def plot_fct_cdf(
@@ -65,44 +65,64 @@ def plot_fct_cdf(
 def plot_multiple_fct_cdf(
     dfs: List[pd.DataFrame],
     labels: List[str],
-    save_path: Optional[str] = None,
-    title: str = "Flow Completion Time CDF Comparison",
-    x_label: str = "FCT (ms)",
-    y_label: str = "CDF",
-    convert_to_ms: bool = True,
-    x_cut_percentile: float = 99.9,  # 裁剪横轴范围到 99.9% 分位
-    show_stats: bool = True,  # 是否打印每组统计
-    x_range_auto: bool = False, # 新增：是否自动识别X轴范围
-    x_range_manual: Optional[List[Union[int, float]]] = None, # 新增：手动指定X轴范围 [min, max]
-) -> None:
+    save_path: str,
+    plot_options: Dict[str, Any],
+    line_configs: List[Dict[str, Any]],
+):
     """
-    绘制多个实验的流完成时间(FCT)累积分布函数(CDF)对比图
+    绘制多个 FCT CDF 图，并将它们叠加在同一张图上。
 
-    Args:
-        dfs: 含'fct_ns'列的 DataFrame 列表
-        labels: 每个 DataFrame 的标签
-        save_path: 若非 None，则保存图片到路径
-        title, x_label, y_label: 图表标题与坐标轴标签
-        convert_to_ms: 是否将纳秒转换为毫秒
-        x_cut_percentile: 用于限制横轴范围的分位点 (默认99.9%)
-        show_stats: 是否打印每组统计结果
+    参数:
+        dfs (List[pd.DataFrame]): 包含 FCT 数据的 DataFrame 列表。
+        labels (List[str]): 对应每个 DataFrame 的标签列表，用于图例。
+        save_path (str): 图表保存路径。
+        plot_options (Dict[str, Any]): 包含全局绘图选项的字典，例如 title, x_label, y_label, convert_to_ms, x_cut_percentile, show_stats, x_range_manual, x_range_auto。
+        line_configs (List[Dict[str, Any]]): 包含每条线配置的字典列表，例如 color, linestyle。
     """
     if len(dfs) != len(labels):
         raise ValueError("❌ dfs 与 labels 长度必须相同")
+    if len(dfs) != len(line_configs):
+        raise ValueError("❌ dfs 与 line_configs 长度必须相同")
+
+    # 从 plot_options 中获取全局绘图设置
+    title = plot_options.get("title", "Flow Completion Time CDF Comparison")
+    x_label = plot_options.get("x_label", "FCT (ms)")
+    y_label = plot_options.get("y_label", "CDF")
+    x_unit = plot_options.get("x_unit", "ms") # 获取 X 轴单位
+    # convert_to_ms = plot_options.get("convert_to_ms", True) # 不再直接使用 convert_to_ms
+    x_cut_percentile = plot_options.get("x_cut_percentile", 99.9)
+    show_stats = plot_options.get("show_stats", True)
+    x_range_manual = plot_options.get("x_range_manual", None)
+    x_range_auto = plot_options.get("x_range_auto", True)
 
     plt.figure(figsize=(10, 6))
     plt.grid(True, linestyle="--", alpha=0.7)
 
     max_cut_value = 0  # 用于裁剪横轴
+    all_fct_values_flat = [] # 用于 x_range_auto 模式下收集所有 FCT 值
 
-    for df, label in zip(dfs, labels):
+    for i, (df, label) in enumerate(zip(dfs, labels)):
+        line_config = line_configs[i]
+        color = line_config.get("color", None)
+        linestyle = line_config.get("linestyle", "-")
+        marker = line_config.get("marker", ".")
+        markersize = line_config.get("markersize", 4)
+
         if "fct_ns" not in df.columns:
             raise ValueError(f"DataFrame '{label}' 缺少 'fct_ns' 列")
 
         fct_values = df["fct_ns"].to_numpy(dtype=np.float64)
-        if convert_to_ms:
-            fct_values /= 1e6
+        # 根据 x_unit 进行单位转换
+        if x_unit == "us":
+            fct_values /= 1e3  # ns -> us
+        elif x_unit == "ms":
+            fct_values /= 1e6  # ns -> ms
+        elif x_unit == "s":
+            fct_values /= 1e9  # ns -> s
+        # 否则保持纳秒 (ns) 不变
+
         fct_values = np.sort(fct_values)
+        all_fct_values_flat.extend(fct_values)
 
         if len(fct_values) == 0:
             print(f"⚠️ 警告: '{label}' 数据为空，跳过")
@@ -111,7 +131,7 @@ def plot_multiple_fct_cdf(
         # 计算CDF
         y_values = np.arange(1, len(fct_values) + 1) / len(fct_values)
         plt.plot(
-            fct_values, y_values, linestyle="-", marker=".", markersize=4, label=label
+            fct_values, y_values, linestyle=linestyle, marker=marker, markersize=markersize, label=label, color=color
         )
 
         # 更新横轴裁剪范围
@@ -127,7 +147,7 @@ def plot_multiple_fct_cdf(
                 "max": np.max(fct_values),
             }
             print(
-                f"📊 [{label}] FCT统计 (ms): "
+                f"📊 [{label}] FCT统计 ({x_unit}): " # 使用 x_unit
                 f"min={stats['min']:.2f}, median={stats['median']:.2f}, "
                 f"p95={stats['p95']:.2f}, p99={stats['p99']:.2f}, max={stats['max']:.2f}"
             )
@@ -140,16 +160,12 @@ def plot_multiple_fct_cdf(
 
     if x_range_manual:
         plt.xlim(left=x_range_manual[0], right=x_range_manual[1])
-    elif x_range_auto:
-        # 自动识别范围，可以根据实际数据进行微调
-        all_fct_values = np.concatenate([df["fct_ns"].to_numpy(dtype=np.float64) / 1e6 for df in dfs if not df.empty])
-        if len(all_fct_values) > 0:
-            min_val = np.min(all_fct_values)
-            max_val = np.max(all_fct_values)
-            # 稍微扩展一下范围，避免数据点正好在边界上
-            plt.xlim(left=min_val * 0.9, right=max_val * 1.1)
-        else:
-            plt.xlim(left=0, right=max_cut_value)
+    elif x_range_auto and len(all_fct_values_flat) > 0:
+        min_fct = np.min(all_fct_values_flat)
+        max_fct = np.max(all_fct_values_flat)
+        # 增加一些边距
+        padding = (max_fct - min_fct) * 0.05
+        plt.xlim(left=max(0, min_fct - padding), right=max_fct + padding)
     else:
         plt.xlim(left=0, right=max_cut_value)
 

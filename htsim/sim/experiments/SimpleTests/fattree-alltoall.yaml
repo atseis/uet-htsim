@@ -1,0 +1,36 @@
+common:
+  execute: True
+  traffic:
+    nodes: 54
+    conns: 27
+    groupsize: 27
+    parallel: 1
+    flowsize: "1MB"
+    extrastarttime: 0
+    randseed: 13
+  simulation:
+    cwnd: 50
+    mtu: 4000
+    end: 300000
+    linkspeed: 100000
+    q: 35
+    log:
+      - sink 
+      - flow_events
+
+experiments:
+  - name: spray_comparison
+    exe: htsim_ndp
+    protocol: ndp
+    traffic:
+      type: [serialn_alltoall, serialn_alltoall_prio]
+    simulation:
+      params: 
+        - 
+          - {strat: ecmp_rr}
+          - {strat: ecmp, paths: 1}
+          - {strat: ecmp, paths: 100}
+          - {strat: ecmp_host, paths: 1}
+          - {strat: ecmp_host, paths: 100}
+          - {strat: perm}
+          - {strat: perm, paths: 1}

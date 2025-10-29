@@ -81,7 +81,7 @@ def get_flags_for_analysis(
 
     # 添加过滤字符串
     for s in filter_strings:
-        flags.extend(["-grep", s])
+        flags.extend(["-filter", s])
 
     # 添加字段
     if fields:

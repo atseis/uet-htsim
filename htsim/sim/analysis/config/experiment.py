@@ -4,8 +4,7 @@ from typing import Dict, Any, List
 from pathlib import Path
 from . import traffic_patterns, status
 from ..runner import run_sim
-from ..viz import plot_generator
-from ..viz import plot_from_yaml
+from ..plot import plot_fct_comparison # 导入 FCT 绘图函数
 
 # === 新增 rich 进度条支持 ===
 from rich.progress import (
@@ -393,31 +392,24 @@ def run_experiment(
     )
     console.print(f"[dim]详细日志: {batch_log_path.as_posix()}[/dim]")
 
-    # === 自动生成图表 ===
-    if "plot" in config:
-        console.print("\n[bold magenta]开始自动生成图表...[/bold magenta]")
-        try:
-            # 生成绘图配置文件并自动生成图表
-            plot_config_paths = plot_generator.write_plot_configs(config_file_path)
-            if not plot_config_paths:
-                console.print("未找到需要生成的图表配置。")
+    # === 绘图阶段 ===
+    plots_to_generate = config.get("plots", [])
+    if plots_to_generate:
+        console.print(f"\n[bold magenta]开始生成图表...[/bold magenta]")
+        for plot_type in plots_to_generate:
+            if plot_type == "cdf-fct":
+                console.print(f"  ▶️ 生成 FCT CDF 对比图 for {current_exp_results_dir.name}...")
+                try:
+                    plot_fct_comparison.plot_fct_comparison(current_exp_results_dir)
+                    console.print(f"  ✅ FCT CDF 对比图生成成功。")
+                except Exception as e:
+                    console.print(f"  ❌ 生成 FCT CDF 对比图失败: {e}")
             else:
-                console.print(f"已生成 {len(plot_config_paths)} 个绘图配置文件。")
-
-                # 遍历并生成图表
-                for plot_config_path in plot_config_paths:
-                    console.print(f"正在生成图表: {plot_config_path}...")
-                    try:
-                        plot_from_yaml.plot_from_config(plot_config_path)
-                    except Exception as e:
-                        console.print(
-                            f"[red]生成图表 {plot_config_path} 失败: {e}[/red]"
-                        )
-                console.print("图表自动生成完成。")
-        except Exception as e:
-            console.print(f"[red]自动生成图表过程出错: {e}[/red]")
+                console.print(f"  ⚠️ 未知图表类型: {plot_type}，跳过。")
     else:
-        console.print("\n[dim]实验配置中未指定 'plot' 字段，跳过自动生成图表。[/dim]")
+        console.print(f"\n[dim]未指定任何图表生成。[/dim]")
+
+
 
 
 def load_config(config_file: str) -> Dict[str, Any]:
