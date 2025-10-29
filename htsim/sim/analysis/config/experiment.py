@@ -34,27 +34,87 @@ def deep_merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+# def expand_params_tree(params: Dict[str, Any]) -> List[Dict[str, Any]]:
+#     """笛卡尔积：递归展开任意层级的 list 值，生成参数组合列表"""
+#     if not params:
+#         return [{}]
+#     combos: List[Dict[str, Any]] = [{}]
+#     for key, val in params.items():
+#         new_combos: List[Dict[str, Any]] = []
+#         if key == "params" and isinstance(val, list):
+#             for base in combos:
+#                 for v in val:
+#                     if isinstance(v, dict):
+#                         new_combos.append({**base, **v})
+#                     else:
+#                         new_combos.append({**base, key: v})
+#         elif isinstance(val, dict):
+#             subvariants = expand_params_tree(val)
+#             for base in combos:
+#                 for sub in subvariants:
+#                     new_combos.append({**base, key: sub})
+#         elif isinstance(val, list) and key != "log":
+#             for base in combos:
+#                 for v in val:
+#                     new_combos.append({**base, key: v})
+#         else:
+#             for base in combos:
+#                 new_combos.append({**base, key: val})
+#         combos = new_combos
+#     return combos
+
+
 def expand_params_tree(params: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """递归展开任意层级的 list 值，生成参数组合列表"""
+    """展开参数字典，其中允许 params 是“参数组的组合组合”"""
     if not params:
         return [{}]
-    combos: List[Dict[str, Any]] = [{}]
+
+    # 普通键值（非 params）的展开
+    base_combos = [{}]
     for key, val in params.items():
-        new_combos: List[Dict[str, Any]] = []
-        if isinstance(val, dict):
-            subvariants = expand_params_tree(val)
-            for base in combos:
-                for sub in subvariants:
-                    new_combos.append({**base, key: sub})
-        elif isinstance(val, list) and key != "log":
-            for base in combos:
+        if key == "params" or key == "log":
+            continue  # params 特殊处理
+        new_combos = []
+        if isinstance(val, list):
+            for base in base_combos:
                 for v in val:
                     new_combos.append({**base, key: v})
         else:
-            for base in combos:
+            for base in base_combos:
                 new_combos.append({**base, key: val})
-        combos = new_combos
-    return combos
+        base_combos = new_combos
+
+    # 处理 params: list[list[dict]] 或 list[dict]
+    param_groups = params.get("params", [])
+    if param_groups:
+        # 如果 params 是单层列表（即没有嵌套），视为只有一组参数
+        if all(isinstance(x, dict) for x in param_groups):
+            param_groups = [param_groups]
+
+        def cartesian_product(groups: List[List[Dict[str, Any]]]):
+            combos = [{}]
+            for group in groups:
+                new_combos = []
+                for base in combos:
+                    for option in group:
+                        new_combos.append({**base, **option})
+                combos = new_combos
+            return combos
+
+        param_combos = cartesian_product(param_groups)
+    else:
+        param_combos = [{}]
+
+    # 与基础键笛卡尔积
+    full_combos = []
+    for base in base_combos:
+        for combo in param_combos:
+            result = {**base, **combo}
+            if "log" in params:
+                result["log"] = params["log"]
+            full_combos.append(result)
+
+    return full_combos
 
 
 def build_flags(params: Dict[str, Any]) -> List[str]:
@@ -75,16 +135,16 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
 
 def generate_traffic(traffic_params: Dict[str, Any], common_config: Dict[str, Any]):
     """根据合并后的参数生成连接矩阵文件"""
-    nested = (
-        traffic_params.get("params", {})
-        if isinstance(traffic_params.get("params"), dict)
-        else {}
-    )
-    if nested:
-        traffic_params = deep_merge(
-            {k: v for k, v in traffic_params.items() if k != "params"}, nested
-        )
-
+    # nested = (
+    #     traffic_params.get("params", {})
+    #     if isinstance(traffic_params.get("params"), dict)
+    #     else {}
+    # )
+    # if nested:
+    #     traffic_params = deep_merge(
+    #         {k: v for k, v in traffic_params.items() if k != "params"}, nested
+    #     )
+    #
     traffic_type = traffic_params.get("type")
     if not traffic_type:
         raise ValueError("traffic.type 未指定")
@@ -297,11 +357,16 @@ def run_experiment(
                 cm_file = generate_traffic(task["t_var"], common)
                 sim_params = dict(task["s_var"])
                 sim_params.pop("execute", None)
-                effective_common = dict(common_flat)
-                effective_common.pop("execute", None)
+                # effective_common = dict(common_flat)
+                # effective_common.pop("execute", None)
                 sim_params.pop("conns", None)
+                # Extract nodes, conns from traffic
+                nodes, conns = task["t_var"]["nodes"], task["t_var"]["conns"]
 
-                flags = build_flags({**effective_common, **sim_params, "tm": cm_file})
+                # flags = build_flags({**effective_common, **sim_params, "tm": cm_file})
+                flags = build_flags(
+                    {**sim_params, "nodes": nodes, "conns": conns, "tm": cm_file}
+                )
                 full_command = f"{task['exe']} {' '.join(flags)} -o {(task['out_name'] / 'output.log').as_posix()}"
                 status.initialize_status(task["status_file"], full_command, label)
 
@@ -335,6 +400,7 @@ def run_experiment(
                             progress.console.print(f"[red]终止：{last_error}[/red]")
                             break
                 else:
+                    progress.console.print(f"[yellow]Dry run: {full_command}[/yellow]")
                     success += 1
                     status.update_status(
                         task["status_file"], "success", error_log="Dry run"
@@ -376,7 +442,9 @@ def run_experiment(
                     try:
                         plot_from_yaml.plot_from_config(plot_config_path)
                     except Exception as e:
-                        console.print(f"[red]生成图表 {plot_config_path} 失败: {e}[/red]")
+                        console.print(
+                            f"[red]生成图表 {plot_config_path} 失败: {e}[/red]"
+                        )
                 console.print("图表自动生成完成。")
         except Exception as e:
             console.print(f"[red]自动生成图表过程出错: {e}[/red]")

@@ -2,8 +2,7 @@ common:
   execute: False
   traffic:
     type: permutation
-    params:
-      flowsize: "2MB"
+    flowsize: "2MB"
   simulation:
     log:
       - sink
@@ -20,10 +19,16 @@ experiments:
     exe: htsim_ndp
     protocol: ndp
     traffic:
+      randseed: [13,14,15,16,17]
       params:
-        randseed: [13,14,15,16,17]
+        - 
+          - {nodes: 432, conns: 432}
+          - {nodes: 1024, conns: 1024}
+          - {nodes: 2000, conns: 2000}
+          - {nodes: 3456, conns: 3456}
+          - {nodes: 8192, conns: 8192}
+          - {nodes: 16000, conns: 16000}
     simulation:
-      nodes: [432, 1024, 2000, 3456, 8192, 16000]
       paths: [1,8,16,32,64,128,256]
       
 

@@ -21,3 +21,4 @@ output/
 *.ipynb
 *.log
 htsim/sim/results/
+htsim/sim/data/connection_matrices/

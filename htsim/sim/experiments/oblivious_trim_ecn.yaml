@@ -2,12 +2,11 @@ common:
   execute: True
   traffic:
     type: permutation
-    params:
-      nodes: 8192
-      conns: 8192
-      flowsize: "2MB" # 修正为字符串，与 README 示例一致
-      extrastarttime: 0
-      randseed: 13
+    nodes: 8192
+    conns: 8192
+    flowsize: "2MB" # 修正为字符串，与 README 示例一致
+    extrastarttime: 0
+    randseed: 13
   simulation:
     log: 
       - sink

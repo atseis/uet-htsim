@@ -28,3 +28,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     experiment.main(args.config_file, args.force, args.continue_on_error)
+    # experiment.main("experiments/spray_comparison.yaml", True, True)

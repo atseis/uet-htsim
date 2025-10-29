@@ -59,7 +59,7 @@ def generate_serial_alltoall_traffic(
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = f"alltoall_serial_{nodes}n_{conns}c_{groupsize}g_{flowsize}.cm"
+    file_name = f"alltoall_serial_{nodes}n_{conns}c_{groupsize}g_{flowsize}_{extrastarttime}es_{randseed}rs.cm"
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
@@ -131,7 +131,7 @@ def generate_allreduce_traffic(nodes, conns, groupsize, flowsize, locality, rand
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = f"allreduce_{nodes}n_{conns}c_{flowsize}.cm"
+    file_name = f"allreduce_{nodes}n_{conns}c_{groupsize}g_{flowsize}_{locality}l_{randseed}rs.cm"
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
@@ -217,7 +217,7 @@ def generate_allreduce_butterfly_traffic(
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = f"allreduce_butterfly_{nodes}n_{groups}g_{groupsize}gs_{flowsize}.cm"
+    file_name = f"allreduce_butterfly_{nodes}n_{groups}g_{groupsize}gs_{flowsize}_{locality}l_{randseed}rs.cm"
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
@@ -340,7 +340,9 @@ def generate_incast_traffic(nodes, conns, flowsize, extrastarttime, randseed):
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = f"incast_{nodes}n_{conns}c_{flowsize}.cm"
+    file_name = (
+        f"incast_{nodes}n_{conns}c_{flowsize}_{extrastarttime}es_{randseed}rs.cm"
+    )
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
@@ -514,7 +516,7 @@ def generate_permutation_full_bisection_traffic(
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = f"perm_full_bisection_{nodes}n_{conns}c_{flowsize}.cm"
+    file_name = f"perm_full_bisection_{nodes}n_{conns}c_{flowsize}_{extrastarttime}es_{randseed}rs.cm"
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
@@ -574,9 +576,7 @@ def generate_serialn_alltoall_traffic(
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = (
-        f"serialn_alltoall_{nodes}n_{conns}c_{groupsize}g_{parallel}p_{flowsize}.cm"
-    )
+    file_name = f"serialn_alltoall_{nodes}n_{conns}c_{groupsize}g_{parallel}p_{flowsize}_{extrastarttime}es_{randseed}rs.cm"
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
@@ -687,7 +687,7 @@ def generate_serialn_alltoall_prio_traffic(
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = f"serialn_alltoall_prio_{nodes}n_{conns}c_{groupsize}g_{parallel}p_{flowsize}.cm"
+    file_name = f"serialn_alltoall_prio_{nodes}n_{conns}c_{groupsize}g_{parallel}p_{flowsize}_{extrastarttime}es_{randseed}rs.cm"
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
