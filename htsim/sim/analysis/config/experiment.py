@@ -4,7 +4,10 @@ from typing import Dict, Any, List
 from pathlib import Path
 from . import traffic_patterns, status
 from ..runner import run_sim
-from ..plot import plot_fct_comparison # 导入 FCT 绘图函数
+from ..plot import (
+    plot_fct_comparison,
+    plot_avg_fct_vs_nodes,
+)  # 导入 FCT 绘图函数与 Avg FCT vs Nodes 绘图函数
 
 # === 新增 rich 进度条支持 ===
 from rich.progress import (
@@ -397,19 +400,28 @@ def run_experiment(
     if plots_to_generate:
         console.print(f"\n[bold magenta]开始生成图表...[/bold magenta]")
         for plot_type in plots_to_generate:
-            if plot_type == "cdf-fct":
-                console.print(f"  ▶️ 生成 FCT CDF 对比图 for {current_exp_results_dir.name}...")
+            if plot_type == "CDF-FCT":
+                console.print(
+                    f"  ▶️ 生成 FCT CDF 对比图 for {current_exp_results_dir.name}..."
+                )
                 try:
                     plot_fct_comparison.plot_fct_comparison(current_exp_results_dir)
                     console.print(f"  ✅ FCT CDF 对比图生成成功。")
                 except Exception as e:
                     console.print(f"  ❌ 生成 FCT CDF 对比图失败: {e}")
+            elif plot_type == "AvgFCT-Nodes":
+                console.print(
+                    f"  ▶️ 生成 Avg FCT vs Nodes 图 for {current_exp_results_dir.name}..."
+                )
+                try:
+                    plot_avg_fct_vs_nodes.plot_avg_fct_vs_nodes(current_exp_results_dir)
+                    console.print(f"  ✅ Avg FCT vs Nodes 图生成成功。")
+                except Exception as e:
+                    console.print(f"  ❌ 生成 Avg FCT vs Nodes 图失败: {e}")
             else:
                 console.print(f"  ⚠️ 未知图表类型: {plot_type}，跳过。")
     else:
         console.print(f"\n[dim]未指定任何图表生成。[/dim]")
-
-
 
 
 def load_config(config_file: str) -> Dict[str, Any]:
