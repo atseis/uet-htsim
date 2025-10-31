@@ -26,6 +26,7 @@ target_include_directories(htsim_dc PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/main
     ${CMAKE_CURRENT_SOURCE_DIR}/topologies
     ${CMAKE_CURRENT_SOURCE_DIR}/traffic
+    ${CMAKE_CURRENT_SOURCE_DIR}/extras
 
 )
 

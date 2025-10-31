@@ -15,8 +15,8 @@ void LoggedManager::add_logged(Logged* logged) {
     _idmap.push_back(logged);
 }
 
-void LoggedManager::dump_idmap() {
-    std::ofstream fout("idmap.txt");
+void LoggedManager::dump_idmap(const std::string& filename) {
+    std::ofstream fout(filename);
     for (size_t i = 0; i < _idmap.size(); i++) {
         fout << _idmap[i]->get_id() << " " << _idmap[i]->_name << endl;
     }

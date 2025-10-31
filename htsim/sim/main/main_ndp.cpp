@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <iostream>
+#include <filesystem>
 #include "clock.h"
 #include "compositequeue.h"
 #include "connection_matrix.h"
@@ -427,6 +428,15 @@ int main(int argc, char** argv) {
     // Logfile
     Logfile logfile(filename.str(), eventlist);
 
+    // Extract directory from filename and construct idmap_filename
+    std::filesystem::path log_path(filename.str());
+    std::string idmap_filename = log_path.parent_path().string() + "/idmap.txt";
+    if (log_path.parent_path().string().empty()) {
+        idmap_filename = "idmap.txt"; // If no directory, save in current
+    }
+
+    cout << "Logging idmap to " << idmap_filename << endl;
+
     cout << "Linkspeed set to " << linkspeed / 1000000000 << "Gbps" << endl;
     logfile.setStartTime(timeFromSec(0));
 
@@ -756,7 +766,7 @@ int main(int argc, char** argv) {
         delete path_refcounts[ix];
     }
 
-    Logged::dump_idmap();
+    Logged::dump_idmap(idmap_filename);
     // Record the setup
     int pktsize = Packet::data_packet_size();
     logfile.write("# pktsize=" + ntoa(pktsize) + " bytes");

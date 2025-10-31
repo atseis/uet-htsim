@@ -1,5 +1,5 @@
 common:
-  execute: False
+  execute: True
   traffic:
     nodes: 1024
     conns: 512
