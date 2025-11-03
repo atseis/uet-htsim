@@ -7,6 +7,7 @@ from ..runner import run_sim
 from ..plot import (
     plot_fct_comparison,
     plot_avg_fct_vs_nodes,
+    plot_max_fct_vs_msgsize,
 )  # 导入 FCT 绘图函数与 Avg FCT vs Nodes 绘图函数
 
 # === 新增 rich 进度条支持 ===
@@ -418,6 +419,15 @@ def run_experiment(
                     console.print(f"  ✅ Avg FCT vs Nodes 图生成成功。")
                 except Exception as e:
                     console.print(f"  ❌ 生成 Avg FCT vs Nodes 图失败: {e}")
+            elif plot_type == "MaxFCT-MsgSize":
+                console.print(
+                    f"  ▶️ 生成 Max FCT vs Message Size 图 for {current_exp_results_dir.name}..."
+                )
+                try:
+                    plot_max_fct_vs_msgsize.plot_max_fct_vs_msgsize(current_exp_results_dir)
+                    console.print(f"  ✅ Max FCT vs Message Size 图生成成功。")
+                except Exception as e:
+                    console.print(f"  ❌ 生成 Max FCT vs Message Size 图失败: {e}")
             else:
                 console.print(f"  ⚠️ 未知图表类型: {plot_type}，跳过。")
     else:

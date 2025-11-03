@@ -1,25 +1,28 @@
+import re
+from pathlib import Path
 import yaml
 import matplotlib.pyplot as plt
 import pandas as pd
-import re
-from pathlib import Path
 from typing import Dict, Any, List
 
 from ..data import metrics
 from ..parser import flow
-from ..config import status
+from ..config import status, traffic_patterns
+
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 
 DEFAULT_PLOT_OPTIONS = {
-    "title": "Average FCT vs. Nodes",
-    "y_label": "Average Flow Completion Time",
-    "x_label": "Network Size (hosts)",
-    "x_unit": "",
+    "title": "Max FCT vs. Message Size",
+    "y_label": "Max Flow Completion Time",
+    "x_label": "Message Size",
+    "x_unit": "bytes",
     "y_unit": "ms",
     "x_range_manual": None,
     "y_range_manual": None,
     "x_range_auto": True,
     "y_range_auto": True,
-    "x_log_scale": False,
+    "x_log_scale": True,
     "y_log_scale": False,
     "show_grid": True,
     "legend_loc": "best",
@@ -27,23 +30,49 @@ DEFAULT_PLOT_OPTIONS = {
     "output_format": "png",
 }
 
+def extract_flowsize_from_cm_filename(path: str) -> str:
+    """
+    从 CM 文件名中提取 flowsize（如 "2MB", "512KiB", "1.5GiB"）。
+    要求 flowsize 以下划线分隔（前面有 "_"）并且后面跟下划线或文件尾 ".cm"。
+    返回干净的字符串（不含下划线或额外空格）。
+    如果找不到则抛出 ValueError。
+    """
+    filename = Path(path).name
+
+    # 使用前瞻和后顾断言确保不把下划线包含进捕获组
+    pattern = re.compile(r"(?i)(?<=_)(\d+(?:\.\d+)?\s*(?:[KMGT](?:i)?B))(?=_|\.cm$)")
+
+    m = pattern.search(filename)
+    if not m:
+        # 作为最后手段，尝试在整个文件名中寻找常见单位（更宽松）
+        fallback = re.search(r"(?i)(\d+(?:\.\d+)?\s*(?:[KMGT](?:i)?B))", filename)
+        if fallback:
+            return fallback.group(1).strip()
+        raise ValueError(f"无法从文件名中提取 flowsize: {filename}")
+
+    return m.group(1).strip()
+
 def parse_command_args(command_str: str) -> Dict[str, str]:
     """
     解析命令行字符串，提取参数及其值。
     例如: "/path/to/executable -k1 v1 -k2 v2 -o output.log" -> {"k1": "v1", "k2": "v2"}
     """
     args = {}
-    # 使用正则表达式匹配 -key value 对
     matches = re.findall(r'-(\w+)\s+([^\s-]+)', command_str)
     for key, value in matches:
-        if key != 'o': # 忽略输出文件参数
+        if key != 'o':
             args[key] = value
     return args
 
+def parse_tm_from_command(command_str: str) -> str:
+    """Extract CM file path from command line's -tm parameter."""
+    pattern = re.compile(r'-tm\s+(\S+)')
+    match = pattern.search(command_str)
+    if not match:
+        raise ValueError(f"无法从命令中提取 -tm 参数: {command_str}")
+    return match.group(1)
+
 def get_common_parameters(data_points: List[Dict]) -> Dict[str, str]:
-    """
-    计算所有实验数据点的公共参数（键值对均相同的参数）
-    """
     if not data_points:
         return {}
     param_dicts = [dp["label_params"] for dp in data_points]
@@ -52,63 +81,66 @@ def get_common_parameters(data_points: List[Dict]) -> Dict[str, str]:
         common_params = {k: v for k, v in common_params.items() if k in params and params[k] == v}
     return common_params
 
-def plot_avg_fct_vs_nodes(experiment_results_dir: Path):
+def bytes_to_human_readable(x, pos):
     """
-    给定实验目录，画出其中不同配置下 Avg FCT 随节点数的变化。
-    每个子实验对应图上的一个点。
+    Formats byte values into human-readable strings (e.g., KB, MB, GB).
     """
+    if x == 0:
+        return "0B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    while x >= 1024 and i < len(units) - 1:
+        x /= 1024
+        i += 1
+    # For integer values, display without decimal, otherwise with one decimal place
+    if x.is_integer():
+        return f"{int(x)}{units[i]}"
+    else:
+        return f"{x:.1f}{units[i]}"
+
+def plot_max_fct_vs_msgsize(experiment_results_dir: Path):
     experiment_results_dir = Path(experiment_results_dir)
     plots_dir = experiment_results_dir / "plots"
     plots_dir.mkdir(parents=True, exist_ok=True)
 
-    console_output = [] # 确保 console_output 始终被初始化
-
-    plot_config_path = plots_dir / "avg-fct-vs-nodes.yaml"
+    plot_config_path = plots_dir / "max-fct-vs-msgsize.yaml"
     plot_options = DEFAULT_PLOT_OPTIONS.copy()
     lines_config = []
 
     if not plot_config_path.exists():
-        # 如果配置文件不存在，则创建默认配置文件
         default_config_to_save = {
             "plot_options": DEFAULT_PLOT_OPTIONS,
             "lines": []
         }
         with open(plot_config_path, "w") as f:
             yaml.safe_dump(default_config_to_save, f, sort_keys=False)
-        console_output.append(f"   - 生成默认绘图配置文件: {plot_config_path}")
 
-    # 无论是否存在，都从配置文件加载
     with open(plot_config_path, "r") as f:
         user_config = yaml.safe_load(f)
         if user_config:
             plot_options.update(user_config.get("plot_options", {}))
             lines_config = user_config.get("lines", [])
 
-    # Determine y-axis unit conversion
     y_unit = plot_options.get("y_unit", "ms")
-    y_conversion_factor = 1e6 # Default to convert ns to ms (1e9 ns / 1e6 = 1e3 us = 1 ms)
+    y_conversion_factor = 1e6
     if y_unit == "us":
-        y_conversion_factor = 1e3 # Convert ns to us (1e9 ns / 1e3 = 1e6 us = 1e3 ms)
+        y_conversion_factor = 1e3
     elif y_unit == "ns":
-        y_conversion_factor = 1 # Keep ns as ns
-    # Update y_label to reflect the unit
-    # plot_options["y_label"] = f"{plot_options['y_label']}{f' ({y_unit})' if y_unit else ''}"
+        y_conversion_factor = 1
 
     output_format = plot_options["output_format"]
-    save_path = plots_dir / f"avg-fct-vs-nodes.{output_format}"
+    save_path = plots_dir / f"max-fct-vs-msgsize.{output_format}"
 
     console_output = []
     data_points = []
 
-    console_output.append(f"🚀 正在生成 Avg FCT vs. Nodes 图表...")
+    console_output.append(f"🚀 正在生成 Max FCT vs. Message Size 图表...")
     console_output.append(f"   - 分析目录: {experiment_results_dir.name}")
     console_output.append(f"   - 绘图配置文件: {plot_config_path}")
     console_output.append(f"   - 输出图表: {save_path}")
 
     for sub_exp_dir in experiment_results_dir.iterdir():
-        if sub_exp_dir.is_dir():
-            if sub_exp_dir.name == "plots":
-                continue
+        if sub_exp_dir.is_dir() and sub_exp_dir.name != "plots":
             status_file = sub_exp_dir / "status.yaml"
             output_log_file = sub_exp_dir / "output.log"
 
@@ -117,34 +149,26 @@ def plot_avg_fct_vs_nodes(experiment_results_dir: Path):
                     exp_status = status.load_status(status_file)
                     command_str = exp_status.get("command", "")
 
-                    # 解析命令参数
-                    cmd_args = parse_command_args(command_str)
+                    tm_path = parse_tm_from_command(command_str)
+                    flowsize_str = extract_flowsize_from_cm_filename(tm_path)
+                    flowsize_bytes = traffic_patterns.convert_to_bytes(flowsize_str)
 
-                    nodes = int(cmd_args.pop("nodes", 0)) # 提取节点数
-
-                    if nodes == 0:
-                        console_output.append(f"     ⚠️ 无法从 {sub_exp_dir.name} 的命令中解析出节点数，跳过。")
-                        continue
-
-                    # 剩余的参数作为该数据点的唯一标识（完整参数组合）
-                    label_params = {k: v for k, v in cmd_args.items() if k not in ["o", "tm", "seed", "nodes"]}
-                    label_params_str = ", ".join([f"{k}={v}" for k, v in sorted(label_params.items())])
-                    if not label_params_str:
-                        label_params_str = "default_config"
-
-                    # 解析 output.log 并计算 Avg FCT
                     df_flows = flow.parse_flow_events_from_file(output_log_file.as_posix())
                     if not df_flows.empty:
                         df_flows = metrics.compute_fct(df_flows)
-                        avg_fct_ns = metrics.compute_avg_fct(df_flows)
-                        # avg_fct_ms = avg_fct_ns / 1e6 # 转换为毫秒
-                        avg_fct_converted = avg_fct_ns / y_conversion_factor # 转换为指定单位
+                        max_fct_ns = metrics.compute_max_fct(df_flows)
+                        max_fct_converted = max_fct_ns / y_conversion_factor
+
+                        cmd_args = parse_command_args(command_str)
+                        label_params = {k: v for k, v in cmd_args.items() if k not in ["o", "tm", "seed", "nodes", "end", "logtime"]}
+                        label_params_str = ", ".join([f"{k}={v}" for k, v in sorted(label_params.items())]) or "default_config"
 
                         data_points.append({
-                            "nodes": nodes,
-                            "avg_fct_converted": avg_fct_converted, # Store converted value
+                            "flowsize_bytes": flowsize_bytes,
+                            "flowsize_label": flowsize_str,
+                            "max_fct_converted": max_fct_converted,
                             "label_params_str": label_params_str,
-                            "label_params": label_params # 存储原始参数字典用于分组
+                            "label_params": label_params
                         })
                     else:
                         console_output.append(f"     ⚠️ {sub_exp_dir.name} 的 output.log 为空或无法解析，跳过。")
@@ -154,18 +178,15 @@ def plot_avg_fct_vs_nodes(experiment_results_dir: Path):
                 console_output.append(f"     ⚠️ {sub_exp_dir.name} 缺少 status.yaml 或 output.log，跳过。")
 
     if not data_points:
-        console_output.append(f"❌ 未找到有效数据点来生成 Avg FCT vs. Nodes 图表。")
+        console_output.append(f"❌ 未找到有效数据点来生成 Max FCT vs. Message Size 图表。")
         print("\n".join(console_output))
         return
 
     df_data = pd.DataFrame(data_points)
-
-    # 计算公共参数并生成/更新线条配置
     common_params = get_common_parameters(data_points)
     unique_data_sources = df_data["label_params_str"].unique().tolist()
     existing_data_sources = [line["data_source"] for line in lines_config if "data_source" in line]
 
-    # 添加新的data_source并生成智能简化标签
     for data_source in unique_data_sources:
         if data_source not in existing_data_sources:
             params_dict = next(dp["label_params"] for dp in data_points if dp["label_params_str"] == data_source)
@@ -176,10 +197,9 @@ def plot_avg_fct_vs_nodes(experiment_results_dir: Path):
                 "label": simplified_label,
                 "color": None,
                 "linestyle": None,
-                "marker": None
+                "marker": 'o'  # Set default marker to 'o' in YAML for configurability
             })
 
-    # 将更新后的 lines_config 和 plot_options 保存回 YAML 文件
     updated_config_to_save = {
         "plot_options": plot_options,
         "lines": lines_config
@@ -188,29 +208,29 @@ def plot_avg_fct_vs_nodes(experiment_results_dir: Path):
         yaml.safe_dump(updated_config_to_save, f, sort_keys=False)
     console_output.append(f"   - 更新绘图配置文件: {plot_config_path}")
 
-    # 构建data_source到线条配置的映射
+    # Create a mapping from flowsize_bytes to original label and linear index for plotting
+    # Assume df_data has 'flowsize_label' column (added during data processing from extract_flowsize_from_cm_filename)
+    # First, ensure we have unique (bytes, label) pairs sorted by bytes
+    unique_flow_pairs = df_data[['flowsize_bytes', 'flowsize_label']].drop_duplicates().sort_values(by='flowsize_bytes').reset_index(drop=True)
+    flowsize_to_index = {row['flowsize_bytes']: i for i, row in unique_flow_pairs.iterrows()}
+    df_data['flowsize_index'] = df_data['flowsize_bytes'].map(flowsize_to_index)
+
     configured_lines_map = {line_cfg["data_source"]: line_cfg for line_cfg in lines_config if "data_source" in line_cfg}
 
     plt.figure(figsize=plot_options["figsize"])
 
-    # 按参数组合分组并绘图
-
-    plt.figure(figsize=plot_options["figsize"])
-    
-    # 按参数组合分组并绘图
     for label_params_str, group_df in df_data.groupby("label_params_str"):
-        group_df_sorted = group_df.sort_values(by="nodes")
-        
+        group_df_sorted = group_df.sort_values(by="flowsize_bytes")
         line_cfg = configured_lines_map.get(label_params_str, {})
-        
+
         plot_label = line_cfg.get("label", label_params_str)
         plot_color = line_cfg.get("color", None)
         plot_linestyle = line_cfg.get("linestyle", '-')
         plot_marker = line_cfg.get("marker", 'o')
 
         plt.plot(
-            group_df_sorted["nodes"],
-            group_df_sorted["avg_fct_converted"], # Use converted value
+            group_df_sorted["flowsize_index"], # Use index for plotting
+            group_df_sorted["max_fct_converted"],
             marker=plot_marker,
             linestyle=plot_linestyle,
             color=plot_color,
@@ -218,39 +238,52 @@ def plot_avg_fct_vs_nodes(experiment_results_dir: Path):
         )
 
     plt.title(plot_options["title"])
-    plt.xlabel(f"{plot_options["x_label"]}{f' ({plot_options["x_unit"]})' if plot_options["x_unit"] else ''}")
-    plt.ylabel(f"{plot_options["y_label"]}{f' ({y_unit})' if y_unit else ''}") # Use the already formatted y_label
+    plt.xlabel(f"{plot_options['x_label']} ({plot_options['x_unit']})")
+    plt.ylabel(f"{plot_options['y_label']} ({y_unit})")
 
     if plot_options["x_range_manual"]:
         plt.xlim(plot_options["x_range_manual"])
     elif plot_options["x_range_auto"]:
         plt.autoscale(enable=True, axis='x')
-    
+
     if plot_options["y_range_manual"]:
         plt.ylim(plot_options["y_range_manual"])
     elif plot_options["y_range_auto"]:
         plt.autoscale(enable=True, axis='y')
 
-    if plot_options["x_log_scale"]:
-        plt.xscale("log")
+    # Set x-axis ticks to linear indices and labels to original extracted strings
+    tick_positions = list(range(len(unique_flow_pairs)))
+    original_labels = unique_flow_pairs['flowsize_label'].tolist()
+    plt.xticks(tick_positions, original_labels)
+
+    # Remove the x_log_scale option as we are using linear indexing for equal spacing
+    # if plot_options["x_log_scale"]:
+    #     plt.xscale("log")
+    #     # Apply custom formatter for human-readable byte sizes
+    #     plt.gca().xaxis.set_major_formatter(FuncFormatter(bytes_to_human_readable))
+
+    # The previous unique_flow_sizes and plt.xticks are replaced by the new logic above
+    # unique_flow_sizes = sorted(df_data["flowsize_bytes"].unique())
+    # plt.xticks(unique_flow_sizes)
+
     if plot_options["y_log_scale"]:
         plt.yscale("log")
-    
+
     if plot_options["show_grid"]:
         plt.grid(True, which="both", ls="-", alpha=0.6)
 
     plt.legend(loc=plot_options["legend_loc"])
-    if not plot_options["x_log_scale"]:
-        plt.ticklabel_format(style='plain', axis='x') # 禁用 X 轴科学计数法
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
 
     console_output.append(f"✅ 图像已保存到 {save_path}")
-    console_output.append(f"✅ Avg FCT vs. Nodes 图表生成完成。")
+    console_output.append(f"✅ Max FCT vs. Message Size 图表生成完成。")
     print("\n".join(console_output))
 
 if __name__ == "__main__":
-    # 指定实验结果目录（来自之前的绘图配置文件路径）
-    experiment_dir = Path("/root/code/uet-htsim/htsim/sim/results/SimpleTests/spray_comparison/")
-    plot_avg_fct_vs_nodes(experiment_dir)
+    import argparse
+    parser = argparse.ArgumentParser(description="Generate Max FCT vs Message Size plot")
+    parser.add_argument("results_dir", help="Path to experiment results directory")
+    args = parser.parse_args()
+    plot_max_fct_vs_msgsize(Path(args.results_dir))

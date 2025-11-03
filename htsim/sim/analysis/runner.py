@@ -311,3 +311,15 @@ def get_cwnd_timeseries(
     return analyze_by_purpose(
         logfile=logfile, analysis_type=AnalysisType.CWND, protocol=protocol, **kwargs
     )
+
+
+def load_idmap(filepath: str) -> dict[int, str]:
+    mapping = {}
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            id, text = line.split(maxsplit=1)
+            mapping[int(id)] = text
+    return mapping
