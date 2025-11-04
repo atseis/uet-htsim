@@ -134,6 +134,7 @@ def generate_traffic(traffic_params: Dict[str, Any], common_config: Dict[str, An
     randseed = traffic_params.get("randseed", common_config.get("seed", 0))
     conns_incast = traffic_params.get("conns_incast", 8)
     conns_outcast = traffic_params.get("conns_outcast", 8)
+    prefer_remote = traffic_params.get("prefer_remote", 0)
 
     # 流量类型分派
     tp = traffic_patterns
@@ -151,7 +152,7 @@ def generate_traffic(traffic_params: Dict[str, Any], common_config: Dict[str, An
         )
     elif traffic_type == "incast":
         cm_file = tp.generate_incast_traffic(
-            nodes, conns, flowsize, extrastarttime, randseed
+            nodes, conns, flowsize, extrastarttime, randseed, prefer_remote
         )
     elif traffic_type == "outcast_incast":
         cm_file = tp.generate_outcast_incast_traffic(

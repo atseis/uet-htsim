@@ -71,7 +71,8 @@ def generate_serial_alltoall_traffic(
     output_content = []
     output_content.append(f"Nodes {nodes}")
     output_content.append(f"Connections {conns * (groupsize - 1)}")
-    output_content.append(f"Triggers {conns * (groupsize - 2)}")
+    # output_content.append(f"Triggers {conns * (groupsize - 2)}")
+    output_content.append(f"Triggers PLACEHOLDER")
 
     srcs = []
     groups = conns // groupsize
@@ -107,6 +108,7 @@ def generate_serial_alltoall_traffic(
         out = f"trigger id {t} oneshot"
         output_content.append(out)
 
+    output_content[2] = f"Triggers {trig_id - 1}"
     target_dir.mkdir(parents=True, exist_ok=True)
     with open(file_path, "w") as f:
         f.write("\n".join(output_content))
@@ -122,10 +124,10 @@ def generate_allreduce_traffic(nodes, conns, groupsize, flowsize, locality, rand
 
     参数:
         nodes (int): 模拟中的节点总数。
-        conns (int): 连接总数。
+        conns (int): 活跃连接总数。
         groupsize (int): 每个 Allreduce 组中的节点数量。
         flowsize (str): 流量大小，例如 "2MB"。
-        locality (int): 局部性设置，如果为1，则对组内的源节点进行排序。
+        locality (int): 局部性设置，如果为1，则对组内的源节点进行排序，使得相邻节点在拓扑中也相邻，这在 fat-tree 拓扑中可以减少跨机架流量，提高性能
         randseed (int): 随机种子，用于打乱节点顺序，如果为0则不使用随机种子。
 
     返回:
@@ -167,8 +169,12 @@ def generate_allreduce_traffic(nodes, conns, groupsize, flowsize, locality, rand
             groupsrcs.sort()
 
         for s in range(groupsize):
+            # Ring Allreduce 分为 2*groupsize-1 个步骤：
+            # Reduce-Scatter（前 groupsize-1）：每个节点向下一个节点发送数据
+            # All-gather（后 groupsize）：每个节点继续向下一个节点传播聚合结果
             for d in range(1, 2 * groupsize):
                 id += 1
+                # 使用环形拓扑
                 src = (s + d - 1) % groupsize
                 dst = (s + d) % groupsize
                 out = f"{groupsrcs[src]}->{groupsrcs[dst]} id {id}"
@@ -334,11 +340,11 @@ def generate_incast_traffic(
 
     参数:
         nodes (int): 模拟中的节点总数。
-        conns (int): 连接总数，即有多少个源节点向目的节点发送流量。
+        conns (int): 活跃连接数（发送方数量）
         flowsize (str): 流量大小，例如 "2MB"。
-        extrastarttime (float): 额外启动时间，用于设置连接的起始时间。
-        randseed (int): 随机种子，用于打乱源节点顺序，如果为0则不使用随机种子。
-        prefer_remote
+        extrastarttime (float): 启动时间分散范围（微秒），用于避免所有流同时开始，模拟更真实的场景
+        randseed (int): 随机种子（0表示随机）
+        prefer_remote：是否优先选择远程节点，该参数的设计思想是模拟跨机架流量，这在 fat-tree 拓扑中会产生更高的网络负载
 
     返回:
         str: 生成的连接矩阵文件的绝对路径。
@@ -355,19 +361,39 @@ def generate_incast_traffic(
     output_content = []
     output_content.append(f"Nodes {nodes}")
     output_content.append(f"Connections {conns}")
-    output_content.append(f"Triggers 0")
+    # output_content.append(f"Triggers 0")
 
     srcs = []
-    for n in range(nodes):
-        srcs.append(n)
-    if randseed != 0:
-        seed(randseed)
-    shuffle(srcs)
-
-    id = 0
-    for c in range(conns):
-        id += 1
-        out = f"{srcs[c]}->{srcs[0]} id {id} start {int(extrastarttime * 1000000)} size {flowsize}"
+    # 根据 prefer_remote 是否优先选择源节点
+    # 若为零，则从 1~nodes-1 中随机选择，然后打乱顺序
+    if prefer_remote == 0:
+        for n in range(1, nodes):
+            srcs.append(n)
+        if randseed != 0:
+            seed(randseed)
+        shuffle(srcs)
+    # 否则，只从拓扑后半部分选择源节点
+    else:
+        for n in range(int(nodes / 2), nodes):
+            srcs.append(n)
+        if randseed != 0:
+            seed(randseed)
+    # 目标节点固定，为 0
+    dst = "0"
+    for n in range(conns):
+        # 启动时间在 0~extrastarttime 微秒之间随机分布
+        extra = randint(0, int(extrastarttime * 1000000))
+        out = (
+            str(srcs[n])
+            + "->"
+            + str(dst)
+            + " id "
+            + str(n + 1)
+            + " start "
+            + str(extra)
+            + " size "
+            + str(flowsize)
+        )
         output_content.append(out)
 
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -382,13 +408,14 @@ def generate_outcast_incast_traffic(
 ):
     """
     生成 Outcast-Incast 混合流量模式。
+    这种模式用于测试拥塞控制算法在复杂流量竞争场景下的公平性和性能表现
     此函数为模拟生成一个连接矩阵文件，其中包含指定节点、Incast 连接数、Outcast 连接数、流大小和随机种子的混合流量模式。
     如果文件已存在，则跳过生成并直接返回文件路径。
 
     参数:
         nodes (int): 模拟中的节点总数。
-        conns_incast (int): Incast 流量的连接数。
-        conns_outcast (int): Outcast 流量的连接数。
+        conns_incast (int): Incast 目标的连接数（发送方数量）
+        conns_outcast (int): Outcast 源的连接数（目标数量）
         flowsize (str): 流量大小，例如 "2MB"。
         randseed (int): 随机种子，如果为0则不使用随机种子。
 
@@ -412,9 +439,10 @@ def generate_outcast_incast_traffic(
         f"Connections {conns_incast + (conns_incast - 1) * (conns_outcast - 1)}"
     )
 
+    # 判断基于给定参数生成的流量模式是否超出节点总数，如果超出则报错
     if ((conns_incast - 1) * conns_outcast + 1 + conns_incast) >= nodes:
         # This should be handled as an error or by adjusting parameters
-        return "Error: Too many connections for target topology"
+        raise ValueError("Error: Too many connections for target topology")
 
     crttarget = conns_incast + 1
     id = 1
@@ -591,7 +619,8 @@ def generate_serialn_alltoall_traffic(
     output_content.append(f"Connections {conns * (groupsize - 1)}")
 
     half = (groupsize - 1) // parallel
-    output_content.append(f"Triggers {(conns // groupsize) * groupsize * half}")
+    # output_content.append(f"Triggers {(conns // groupsize) * groupsize * half}")
+    output_content.append("Triggers PLACEHOLDER")
 
     srcs = []
     groups = conns // groupsize
@@ -615,9 +644,7 @@ def generate_serialn_alltoall_traffic(
         half = (groupsize - 1) // parallel
         left = (groupsize - 1) % parallel
         for s in range(groupsize):
-            prio = 0
             for d in range(1, half + 1):
-                prio += 1
                 st_trigger = trig_id
 
                 if d != half or left > 0:
@@ -637,11 +664,9 @@ def generate_serialn_alltoall_traffic(
 
                     if d != half or left > 0:
                         out = out + f" send_done_trigger {trig_id}"
-                    out = out + f" prio {prio}"
 
                     output_content.append(out)
 
-            prio += 1
             if left > 0:
                 st_trigger = trig_id
 
@@ -652,12 +677,13 @@ def generate_serialn_alltoall_traffic(
 
                     out = out + f" trigger {st_trigger}"
                     out = out + f" size {flowsize}"
-                    out = out + f" prio {prio}"
                     output_content.append(out)
 
     for t in range(1, trig_id + 1):
         out = f"trigger id {t} multishot"
         output_content.append(out)
+
+    output_content[2] = f"Triggers {trig_id}"
 
     target_dir.mkdir(parents=True, exist_ok=True)
     with open(file_path, "w") as f:
@@ -695,15 +721,19 @@ def generate_serialn_alltoall_prio_traffic(
         print(f"File {file_path} already exists. Skipping generation.")
         return str(file_path)
 
+    if conns % groupsize != 0:
+        raise ValueError("conns must be a multiple of groupsize\n")
+
     output_content = []
     output_content.append(f"Nodes {nodes}")
     output_content.append(f"Connections {conns * (groupsize - 1)}")
 
-    if (conns - 1) % parallel == 0:
-        output_content.append(f"Triggers {groupsize * ((conns - 1) // parallel - 1)}")
-    else:
-        output_content.append(f"Triggers {groupsize * ((conns - 1) // parallel)}")
+    # if (conns - 1) % parallel == 0:
+    #     output_content.append(f"Triggers {groupsize * ((conns - 1) // parallel - 1)}")
+    # else:
+    #     output_content.append(f"Triggers {groupsize * ((conns - 1) // parallel)}")
 
+    output_content.append("Triggers PLACEHOLDER")
     srcs = []
     groups = conns // groupsize
 
@@ -770,6 +800,7 @@ def generate_serialn_alltoall_prio_traffic(
         out = f"trigger id {t} multishot"
         output_content.append(out)
 
+    output_content[2] = f"Triggers {trig_id}"
     target_dir.mkdir(parents=True, exist_ok=True)
     with open(file_path, "w") as f:
         f.write("\n".join(output_content))
