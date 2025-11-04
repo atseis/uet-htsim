@@ -41,10 +41,8 @@ f = open(filename, "w")
 print("Nodes", nodes, file=f)
 print("Connections", conns*(groupsize-1), file=f)
 
-if (conns-1) % parallel == 0:
-    print("Triggers", groupsize*((conns-1)//parallel-1), file=f)
-else:
-    print("Triggers", groupsize*((conns-1)//parallel), file=f)
+half = (groupsize-1) // parallel
+print("Triggers", (conns // groupsize) * groupsize * half, file=f)
 
 srcs = []
 dsts = []

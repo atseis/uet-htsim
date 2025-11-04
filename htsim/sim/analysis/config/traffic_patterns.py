@@ -323,7 +323,9 @@ def generate_allreduce_butterfly_traffic(
     return str(file_path)
 
 
-def generate_incast_traffic(nodes, conns, flowsize, extrastarttime, randseed):
+def generate_incast_traffic(
+    nodes, conns, flowsize, extrastarttime, randseed, prefer_remote
+):
     """
     生成 Incast 流量模式。
     此函数为模拟生成一个连接矩阵文件，其中包含指定节点、连接数、流大小、额外启动时间和随机种子的 Incast 流量模式。
@@ -336,13 +338,12 @@ def generate_incast_traffic(nodes, conns, flowsize, extrastarttime, randseed):
         flowsize (str): 流量大小，例如 "2MB"。
         extrastarttime (float): 额外启动时间，用于设置连接的起始时间。
         randseed (int): 随机种子，用于打乱源节点顺序，如果为0则不使用随机种子。
+        prefer_remote
 
     返回:
         str: 生成的连接矩阵文件的绝对路径。
     """
-    file_name = (
-        f"incast_{nodes}n_{conns}c_{flowsize}_{extrastarttime}es_{randseed}rs.cm"
-    )
+    file_name = f"incast_{nodes}n_{conns}c_{flowsize}_{extrastarttime}es_{randseed}rs_{prefer_remote}pr.cm"
     flowsize = convert_to_bytes(flowsize)
     target_dir = PROJECT_DIR / "data" / "connection_matrices"
     file_path = target_dir / file_name
@@ -589,10 +590,8 @@ def generate_serialn_alltoall_traffic(
     output_content.append(f"Nodes {nodes}")
     output_content.append(f"Connections {conns * (groupsize - 1)}")
 
-    if (conns - 1) % parallel == 0:
-        output_content.append(f"Triggers {groupsize * ((conns - 1) // parallel - 1)}")
-    else:
-        output_content.append(f"Triggers {groupsize * ((conns - 1) // parallel)}")
+    half = (groupsize - 1) // parallel
+    output_content.append(f"Triggers {(conns // groupsize) * groupsize * half}")
 
     srcs = []
     groups = conns // groupsize

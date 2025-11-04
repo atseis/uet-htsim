@@ -424,7 +424,9 @@ def run_experiment(
                     f"  ▶️ 生成 Max FCT vs Message Size 图 for {current_exp_results_dir.name}..."
                 )
                 try:
-                    plot_max_fct_vs_msgsize.plot_max_fct_vs_msgsize(current_exp_results_dir)
+                    plot_max_fct_vs_msgsize.plot_max_fct_vs_msgsize(
+                        current_exp_results_dir
+                    )
                     console.print(f"  ✅ Max FCT vs Message Size 图生成成功。")
                 except Exception as e:
                     console.print(f"  ❌ 生成 Max FCT vs Message Size 图失败: {e}")
