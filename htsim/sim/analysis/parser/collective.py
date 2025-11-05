@@ -1,3 +1,4 @@
+from collections import defaultdict, deque
 import re
 from pathlib import Path
 from typing import Dict, List, Union
@@ -7,6 +8,30 @@ import yaml
 from ..parser import flow
 from ..runner import load_idmap
 import pandas as pd
+
+
+def find_butterfly_groups(all_flows):
+    graph = defaultdict(set)
+    for f in all_flows:
+        graph[f["src"]].add(f["dst"])
+        graph[f["dst"]].add(f["src"])
+    visited = set()
+    groups = []
+    for node in graph.keys():
+        if node in visited:
+            continue
+        queue = deque([node])
+        comp = []
+        visited.add(node)
+        while queue:
+            u = queue.popleft()
+            comp.append(u)
+            for v in graph[u]:
+                if v not in visited:
+                    visited.add(v)
+                    queue.append(v)
+        groups.append(sorted(comp))
+    return groups
 
 
 def get_flow_id_from_src_dst(
@@ -20,6 +45,8 @@ def get_flow_id_from_src_dst(
         if flow_str.endswith(search_suffix):
             return flow_id
     return None
+
+
 def parse_collectives_from_cm(
     filename: Union[str, Path], idmap: Dict[int, str]
 ) -> List[List[Dict]]:
@@ -63,12 +90,8 @@ def parse_collectives_from_cm(
         mode = "serialn_alltoall_prio"
     elif "serialn_alltoall" in fname:
         mode = "serialn_alltoall"
-    elif "serial_alltoall" in fname:
-        mode = "serial_alltoall"
     elif "alltoall_serial" in fname:
         mode = "alltoall_serial"
-    elif "alltoall" in fname:
-        mode = "alltoall"
     elif "allreduce_butterfly" in fname:
         mode = "allreduce_butterfly"
     elif "allreduce" in fname:
@@ -88,7 +111,7 @@ def parse_collectives_from_cm(
     # 4. 计算 flows_per_collective
     # ======================
     flows_per_collective = None
-    if mode in ("alltoall", "serialn_alltoall", "serialn_alltoall_prio"):
+    if mode in ("alltoall_serial", "serialn_alltoall", "serialn_alltoall_prio"):
         if groupsize is None:
             raise ValueError("groupsize could not be inferred from filename.")
         flows_per_collective = groupsize * (groupsize - 1)
@@ -131,9 +154,12 @@ def parse_collectives_from_cm(
             size = int(size_match.group(1)) if size_match else None
             prio_match = re.search(r"prio (\d+)", line)
             prio = int(prio_match.group(1)) if prio_match else None
-            triggers = [int(t) for t in re.findall(
-                r"(?:trigger|send_done_trigger|recv_done_trigger) (\d+)", line
-            )]
+            triggers = [
+                int(t)
+                for t in re.findall(
+                    r"(?:trigger|send_done_trigger|recv_done_trigger) (\d+)", line
+                )
+            ]
 
             flow_info = {
                 "src": src,
@@ -152,7 +178,12 @@ def parse_collectives_from_cm(
     # ======================
     collectives = []
 
-    if mode in ("alltoall", "serialn_alltoall", "serialn_alltoall_prio", "allreduce"):
+    if mode in (
+        "alltoall_serial",
+        "serialn_alltoall",
+        "serialn_alltoall_prio",
+        "allreduce",
+    ):
         current_collective = []
         flow_count = 0
         for flow_info in all_flows:
@@ -166,17 +197,12 @@ def parse_collectives_from_cm(
             collectives.append(current_collective)
 
     elif mode == "allreduce_butterfly":
-        # 每个 group 的 flow 作为一个 collective
-        node_groups = [list(range(g * groupsize, (g + 1) * groupsize)) for g in range(groups)]
-        group_flows_dict = {g: [] for g in range(groups)}
-
-        for flow_info in all_flows:
-            for g, nodes_in_group in enumerate(node_groups):
-                if flow_info["src"] in nodes_in_group:
-                    group_flows_dict[g].append(flow_info)
-                    break
-
-        collectives = list(group_flows_dict.values())
+        butterfly_groups = find_butterfly_groups(all_flows)
+        collectives = []
+        for comp in butterfly_groups:
+            s = set(comp)
+            flows = [f for f in all_flows if f["src"] in s]
+            collectives.append(flows)
 
     else:
         # 单 collective 情况
@@ -280,6 +306,7 @@ def get_collective_ccts_from_directory(directory_path: Union[str, Path]) -> List
 def get_collective_ccts_from_files(
     log_file: Union[str, Path], cm_file: Union[str, Path], idmap_file: Union[str, Path]
 ) -> List[float]:
+    # ... existing code ...
     """
     从日志文件、CM 文件和 idmap 文件中获取 collective 的 CCT 列表。
 
@@ -378,3 +405,97 @@ def get_collective_ccts_from_files(
 
         traceback.print_exc()
         return []
+
+
+def get_collective_details_from_directory(
+    directory_path: Union[str, Path],
+) -> List[Dict]:
+    """
+    从指定的实验结果目录中读取 output.log, idmap.txt, status.yaml 文件，
+    并从 status.yaml 中解析出 CM 文件路径，然后解析 collective 的详细信息。
+
+    Args:
+        directory_path: 实验结果目录的路径。
+
+    Returns:
+        一个列表，其中每个元素是一个字典，包含一个 collective 的所有节点和流。
+        例如：
+        [
+            {
+                "collective_id": 0,
+                "nodes": [0, 1, 2, 3],
+                "flows": [
+                    {"src": 0, "dst": 1, "id": 100, "flow_id": 1000},
+                    {"src": 1, "dst": 0, "id": 101, "flow_id": 1001},
+                    # ... 更多流
+                ]
+            },
+            # ... 更多 collective
+        ]
+    """
+    directory_path = Path(directory_path)
+
+    log_file = directory_path / "output.log"
+    idmap_file = directory_path / "idmap.txt"
+    status_file = directory_path / "status.yaml"
+
+    if not log_file.exists():
+        print(f"错误: 日志文件 {log_file} 不存在。")
+        return []
+    if not idmap_file.exists():
+        print(f"错误: ID Map 文件 {idmap_file} 不存在。")
+        return []
+    if not status_file.exists():
+        print(f"错误: Status 文件 {status_file} 不存在。")
+        return []
+
+    # 从 status.yaml 中解析 CM 文件路径
+    cm_file = None
+    try:
+        with open(status_file, "r") as f:
+            status_data = yaml.safe_load(f)
+            command_str = status_data.get("command", "")
+            # 使用正则表达式从 command 字符串中提取 -tm 后面的路径
+            match = re.search(r"-tm\s+(\S+)", command_str)
+            if match:
+                cm_file = Path(match.group(1))
+            else:
+                print(f"错误: 未能在 {status_file} 的 command 字段中找到 CM 文件路径。")
+                return []
+    except Exception as e:
+        print(f"错误: 读取或解析 {status_file} 失败: {e}")
+        return []
+
+    if not cm_file or not cm_file.exists():
+        print(f"错误: CM 文件 {cm_file} 不存在或未找到。")
+        return []
+
+    # 加载 idmap 文件
+    idmap = load_idmap(str(idmap_file))
+
+    # 解析 CM 文件
+    collectives = parse_collectives_from_cm(cm_file, idmap)
+
+    collective_details = []
+    for i, collective in enumerate(collectives):
+        nodes = set()
+        flows_info = []
+        for flow_data in collective:
+            nodes.add(flow_data["src"])
+            nodes.add(flow_data["dst"])
+            flows_info.append(
+                {
+                    "src": flow_data["src"],
+                    "dst": flow_data["dst"],
+                    "id": flow_data["id"],
+                    "flow_id": flow_data["flow_id"],
+                }
+            )
+        collective_details.append(
+            {
+                "collective_id": i,
+                "nodes": sorted(list(nodes)),
+                "flows": flows_info,
+            }
+        )
+    return collective_details
