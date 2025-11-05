@@ -1,6 +1,6 @@
 from ..runner import BUILD_DIR, PROJECT_DIR
 import yaml, itertools, subprocess, os, sys, datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 from . import traffic_patterns, status
 from ..runner import run_sim
@@ -8,6 +8,7 @@ from ..plot import (
     plot_fct_comparison,
     plot_avg_fct_vs_nodes,
     plot_max_fct_vs_msgsize,
+    plot_max_cct_vs_algorithm,
 )  # 导入 FCT 绘图函数与 Avg FCT vs Nodes 绘图函数
 
 # === 新增 rich 进度条支持 ===
@@ -340,7 +341,22 @@ def run_experiment(
                 # flags = build_flags({**effective_common, **sim_params, "tm": cm_file})
                 flags = build_flags({**sim_params, "nodes": nodes, "tm": cm_file})
                 full_command = f"{task['exe']} {' '.join(flags)} -o {(task['out_name'] / 'output.log').as_posix()}"
-                status.initialize_status(task["status_file"], full_command, label)
+
+                current_exp_config = deep_merge(task["t_var"], task["s_var"])
+
+                # Construct variables based on identified variable_keys
+                task_variables = []
+                for key in variable_keys:
+                    if (
+                        key != "name"
+                    ):  # 'name' is already part of the experiment ID/label
+                        value = current_exp_config.get(key)
+                        if value is not None:
+                            task_variables.append({key: value})
+
+                status.initialize_status(
+                    task["status_file"], full_command, label, variables=task_variables
+                )
 
                 if task["execute"]:
                     run_result = run_sim(
@@ -357,6 +373,7 @@ def run_experiment(
                             "success",
                             exit_code=0,
                             duration_sec=dur,
+                            variables=task_variables,
                         )
                     else:
                         failed += 1
@@ -367,6 +384,7 @@ def run_experiment(
                             exit_code=int(run_result["exit_code"]),
                             duration_sec=dur,
                             error_log=str(run_result["stderr"]),
+                            variables=task_variables,
                         )
                         if not continue_on_error:
                             progress.console.print(f"[red]终止：{last_error}[/red]")
@@ -375,7 +393,10 @@ def run_experiment(
                     progress.console.print(f"[yellow]Dry run: {full_command}[/yellow]")
                     success += 1
                     status.update_status(
-                        task["status_file"], "success", error_log="Dry run"
+                        task["status_file"],
+                        "success",
+                        error_log="Dry run",
+                        variables=task_variables,
                     )
 
                 done += 1
@@ -431,6 +452,17 @@ def run_experiment(
                     console.print(f"  ✅ Max FCT vs Message Size 图生成成功。")
                 except Exception as e:
                     console.print(f"  ❌ 生成 Max FCT vs Message Size 图失败: {e}")
+            elif plot_type == "CCT-Algo":
+                console.print(
+                    f"  ▶️ 生成 CCT vs Algorithm 图 for {current_exp_results_dir.name}..."
+                )
+                try:
+                    plot_max_cct_vs_algorithm.plot_cct_vs_algorithm(
+                        current_exp_results_dir
+                    )
+                    console.print(f"  ✅  CCT vs Algorithm 图生成成功。")
+                except Exception as e:
+                    console.print(f"  ❌ 生成 CCT vs Algorithm 图失败: {e}")
             else:
                 console.print(f"  ⚠️ 未知图表类型: {plot_type}，跳过。")
     else:

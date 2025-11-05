@@ -1,0 +1,37 @@
+common:
+  execute: True
+  traffic:
+    nodes: 2048          # 集群规模（可根据你的测试需要调整）
+    conns: 64            # 64 个并发 collective
+    flowsize: "128KB"    # chunk size = 128KB
+    extrastarttime: 0
+    randseed: 13
+  simulation:
+    log:
+      - sink
+      - flow_events
+    linkspeed: 400000    # 400Gbps
+    cwnd: 50
+    mtu: 4000            # 4KB
+    end: 300             # 模拟时间
+    logtime: 0.01
+
+experiments:
+  - name: simple_allreduce_test
+    exe: htsim_ndp
+    protocol: ndp
+    simulation:
+      strat: ecmp
+      paths: [256]       # 对应 STrack 的 max paths=256，也可用于基线
+      q: [1000]          # 简单使用默认队列大小
+    traffic:
+      flowsize: ["128KB", "256KB"]
+      params:
+        -
+          # 使用多作业场景：64 个 allreduce（你也可以写成 generate）
+          - {"type":"allreduce","nodes":432,"conns":432,"groupsize":16,"randseed":42}
+          - {"type":"allreduce_butterfly","nodes":432,"groups":27,"groupsize":16,"randseed":42}
+
+plots:
+  - CDF-FCT
+  - CCT-Algo

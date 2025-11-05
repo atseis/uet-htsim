@@ -15,13 +15,11 @@ def get_flow_id_from_src_dst(
     """
     根据 src 和 dst 从 idmap 中查找对应的 FlowID。
     """
-    target_str = f"ndp_{src}_{dst}"
+    search_suffix = f"_{src}_{dst}"
     for flow_id, flow_str in idmap.items():
-        if flow_str == target_str:
+        if flow_str.endswith(search_suffix):
             return flow_id
     return None
-
-
 def parse_collectives_from_cm(
     filename: Union[str, Path], idmap: Dict[int, str]
 ) -> List[List[Dict]]:
@@ -33,7 +31,7 @@ def parse_collectives_from_cm(
         - serial_alltoall
         - serialn_alltoall (+ prio)
         - allreduce
-        - allreduce_butterfly  (视为多个小组的单 collective)
+        - allreduce_butterfly (每个小组视为一个 collective)
         - 其他模式 (perm, incast, outcast...) → 单 collective
 
     返回:
@@ -55,20 +53,20 @@ def parse_collectives_from_cm(
     filename = Path(filename)
     if not filename.exists():
         raise FileNotFoundError(f"CM file not found: {filename}")
-
     fname = filename.name.lower()
 
     # ======================
     # 2. 识别模式
     # ======================
     mode = None
-
     if "serialn_alltoall_prio" in fname:
         mode = "serialn_alltoall_prio"
     elif "serialn_alltoall" in fname:
         mode = "serialn_alltoall"
-    elif "serial_alltoall" in fname or "alltoall_serial" in fname:
-        mode = "alltoall"
+    elif "serial_alltoall" in fname:
+        mode = "serial_alltoall"
+    elif "alltoall_serial" in fname:
+        mode = "alltoall_serial"
     elif "alltoall" in fname:
         mode = "alltoall"
     elif "allreduce_butterfly" in fname:
@@ -76,57 +74,51 @@ def parse_collectives_from_cm(
     elif "allreduce" in fname:
         mode = "allreduce"
     else:
-        mode = "single_collective"  # incast, perm, outcast-incast, etc.
+        mode = "single_collective"
 
     # ======================
     # 3. 解析 groupsize（仅 alltoall / allreduce 系列需要）
     # ======================
     groupsize = None
-
-    # 匹配文件名中 "_8g_" 或 "_8gs_" 之类
     g = re.search(r"_(\d+)g[s]?_?", fname)
     if g:
         groupsize = int(g.group(1))
 
     # ======================
-    # 4. 计算每个 collective 的 flow 数
+    # 4. 计算 flows_per_collective
     # ======================
+    flows_per_collective = None
     if mode in ("alltoall", "serialn_alltoall", "serialn_alltoall_prio"):
         if groupsize is None:
             raise ValueError("groupsize could not be inferred from filename.")
         flows_per_collective = groupsize * (groupsize - 1)
-
     elif mode == "allreduce":
         if groupsize is None:
             raise ValueError("groupsize could not be inferred from filename.")
         flows_per_collective = groupsize * (2 * groupsize - 1)
-
     elif mode == "allreduce_butterfly":
-        # 每个 groupsize 是一个 Butterfly 子组，但不作为多个 collective
+        if groupsize is None:
+            raise ValueError("groupsize could not be inferred from filename.")
+        # Butterfly 的 flows_per_collective 不固定，每个 group 是一个 collective
         flows_per_collective = None
-
-    else:
-        # 其他模式：单 collective
-        flows_per_collective = None
+        # 尝试解析节点总数
+        nodes_match = re.search(r"_(\d+)n_", fname)
+        if nodes_match:
+            nodes = int(nodes_match.group(1))
+            groups = nodes // groupsize
+        else:
+            raise ValueError("Cannot infer number of nodes for Butterfly.")
 
     # ======================
-    # 5. 正式解析 CM 文件
+    # 5. 解析 CM 文件，收集 flow
     # ======================
-    collectives = []
-    current_collective = []
-    flow_count = 0
-
     flow_pattern = re.compile(r"(\d+)->(\d+).*id (\d+)")
+    all_flows = []
 
     with open(filename, "r") as f:
         for line in f:
             line = line.strip()
-            if (
-                not line
-                or line.startswith("Nodes")
-                or line.startswith("Connections")
-                or line.startswith("Triggers")
-            ):
+            if not line or line.startswith(("Nodes", "Connections", "Triggers")):
                 continue
 
             m = flow_pattern.search(line)
@@ -135,19 +127,13 @@ def parse_collectives_from_cm(
 
             src, dst, fid = map(int, m.groups())
             flow_id = get_flow_id_from_src_dst(idmap, src, dst)
-
             size_match = re.search(r"size (\d+)", line)
             size = int(size_match.group(1)) if size_match else None
-
             prio_match = re.search(r"prio (\d+)", line)
             prio = int(prio_match.group(1)) if prio_match else None
-
-            triggers = [
-                int(t)
-                for t in re.findall(
-                    r"(?:trigger|send_done_trigger|recv_done_trigger) (\d+)", line
-                )
-            ]
+            triggers = [int(t) for t in re.findall(
+                r"(?:trigger|send_done_trigger|recv_done_trigger) (\d+)", line
+            )]
 
             flow_info = {
                 "src": src,
@@ -159,18 +145,42 @@ def parse_collectives_from_cm(
                 "flow_id": flow_id,
             }
 
+            all_flows.append(flow_info)
+
+    # ======================
+    # 6. 切分 collectives
+    # ======================
+    collectives = []
+
+    if mode in ("alltoall", "serialn_alltoall", "serialn_alltoall_prio", "allreduce"):
+        current_collective = []
+        flow_count = 0
+        for flow_info in all_flows:
             current_collective.append(flow_info)
             flow_count += 1
-
-            # 需要切分 collective
-            if flows_per_collective is not None and flow_count >= flows_per_collective:
+            if flow_count >= flows_per_collective:
                 collectives.append(current_collective)
                 current_collective = []
                 flow_count = 0
+        if current_collective:
+            collectives.append(current_collective)
 
-    # 收尾
-    if current_collective:
-        collectives.append(current_collective)
+    elif mode == "allreduce_butterfly":
+        # 每个 group 的 flow 作为一个 collective
+        node_groups = [list(range(g * groupsize, (g + 1) * groupsize)) for g in range(groups)]
+        group_flows_dict = {g: [] for g in range(groups)}
+
+        for flow_info in all_flows:
+            for g, nodes_in_group in enumerate(node_groups):
+                if flow_info["src"] in nodes_in_group:
+                    group_flows_dict[g].append(flow_info)
+                    break
+
+        collectives = list(group_flows_dict.values())
+
+    else:
+        # 单 collective 情况
+        collectives = [all_flows]
 
     return collectives
 

@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import subprocess
 
 def get_git_commit() -> str:
@@ -21,7 +21,7 @@ def save_status(status_file_path: Path, status_data: Dict[str, Any]):
     with open(status_file_path, 'w') as f:
         yaml.safe_dump(status_data, f)
 
-def initialize_status(status_file_path: Path, command: str, experiment_id: str) -> Dict[str, Any]:
+def initialize_status(status_file_path: Path, command: str, experiment_id: str, variables: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     status_data = {
         "id": experiment_id,
         "command": command,
@@ -33,6 +33,7 @@ def initialize_status(status_file_path: Path, command: str, experiment_id: str) 
         "error_log": "",
         "git_commit": get_git_commit(),
         "rerun_count": 0,
+        "variables": variables if variables is not None else [],
     }
     save_status(status_file_path, status_data)
     return status_data
@@ -42,7 +43,8 @@ def update_status(status_file_path: Path, new_status: str,
                   error_log: str = "", 
                   start_time: Optional[str] = None,
                   end_time: Optional[str] = None,
-                  duration_sec: Optional[float] = None) -> Dict[str, Any]:
+                  duration_sec: Optional[float] = None,
+                  variables: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     status_data = load_status(status_file_path)
     status_data["status"] = new_status
     if exit_code is not None: status_data["exit_code"] = exit_code
@@ -50,6 +52,7 @@ def update_status(status_file_path: Path, new_status: str,
     if start_time: status_data["start_time"] = start_time
     if end_time: status_data["end_time"] = end_time
     if duration_sec is not None: status_data["duration_sec"] = duration_sec
+    if variables is not None: status_data["variables"] = variables
     
     if new_status == "running":
         status_data["rerun_count"] = status_data.get("rerun_count", 0) + 1
