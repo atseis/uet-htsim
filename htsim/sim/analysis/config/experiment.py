@@ -6,6 +6,7 @@ from . import traffic_patterns, status
 from ..runner import run_sim
 from ..plot import (
     plot_fct_comparison,
+    plot_cct_comparison,
     plot_avg_fct_vs_nodes,
     plot_max_fct_vs_msgsize,
     plot_max_cct_vs_algorithm,
@@ -432,6 +433,15 @@ def run_experiment(
                     console.print(f"  ✅ FCT CDF 对比图生成成功。")
                 except Exception as e:
                     console.print(f"  ❌ 生成 FCT CDF 对比图失败: {e}")
+            elif plot_type == "CDF-CCT":
+                console.print(
+                    f"  ▶️ 生成 CCT CDF 对比图 for {current_exp_results_dir.name}..."
+                )
+                try:
+                    plot_cct_comparison.plot_cct_comparison(current_exp_results_dir)
+                    console.print(f"  ✅ CCT CDF 对比图生成成功。")
+                except Exception as e:
+                    console.print(f"  ❌ 生成 CCT CDF 对比图失败: {e}")
             elif plot_type == "AvgFCT-Nodes":
                 console.print(
                     f"  ▶️ 生成 Avg FCT vs Nodes 图 for {current_exp_results_dir.name}..."
