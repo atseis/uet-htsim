@@ -10,7 +10,7 @@ from ..runner import load_idmap
 import pandas as pd
 
 
-def find_butterfly_groups(all_flows):
+def find_collective_node_groups(all_flows):
     graph = defaultdict(set)
     for f in all_flows:
         graph[f["src"]].add(f["dst"])
@@ -80,58 +80,6 @@ def parse_collectives_from_cm(
     filename = Path(filename)
     if not filename.exists():
         raise FileNotFoundError(f"CM file not found: {filename}")
-    fname = filename.name.lower()
-
-    # ======================
-    # 2. 识别模式
-    # ======================
-    mode = None
-    if "serialn_alltoall_prio" in fname:
-        mode = "serialn_alltoall_prio"
-    elif "serialn_alltoall" in fname:
-        mode = "serialn_alltoall"
-    elif "alltoall_serial" in fname:
-        mode = "alltoall_serial"
-    elif "allreduce_butterfly" in fname:
-        mode = "allreduce_butterfly"
-    elif "allreduce" in fname:
-        mode = "allreduce"
-    else:
-        mode = "single_collective"
-
-    # ======================
-    # 3. 解析 groupsize（仅 alltoall / allreduce 系列需要）
-    # ======================
-    groupsize = None
-    g = re.search(r"_(\d+)g[s]?_?", fname)
-    if g:
-        groupsize = int(g.group(1))
-
-    # ======================
-    # 4. 计算 flows_per_collective
-    # ======================
-    flows_per_collective = None
-    if mode in ("alltoall_serial", "serialn_alltoall", "serialn_alltoall_prio"):
-        if groupsize is None:
-            raise ValueError("groupsize could not be inferred from filename.")
-        flows_per_collective = groupsize * (groupsize - 1)
-    elif mode == "allreduce":
-        if groupsize is None:
-            raise ValueError("groupsize could not be inferred from filename.")
-        flows_per_collective = groupsize * (2 * groupsize - 1)
-    elif mode == "allreduce_butterfly":
-        if groupsize is None:
-            raise ValueError("groupsize could not be inferred from filename.")
-        # Butterfly 的 flows_per_collective 不固定，每个 group 是一个 collective
-        flows_per_collective = None
-        # 尝试解析节点总数
-        nodes_match = re.search(r"_(\d+)n_", fname)
-        if nodes_match:
-            nodes = int(nodes_match.group(1))
-            groups = nodes // groupsize
-        else:
-            raise ValueError("Cannot infer number of nodes for Butterfly.")
-
     # ======================
     # 5. 解析 CM 文件，收集 flow
     # ======================
@@ -178,35 +126,12 @@ def parse_collectives_from_cm(
     # ======================
     collectives = []
 
-    if mode in (
-        "alltoall_serial",
-        "serialn_alltoall",
-        "serialn_alltoall_prio",
-        "allreduce",
-    ):
-        current_collective = []
-        flow_count = 0
-        for flow_info in all_flows:
-            current_collective.append(flow_info)
-            flow_count += 1
-            if flow_count >= flows_per_collective:
-                collectives.append(current_collective)
-                current_collective = []
-                flow_count = 0
-        if current_collective:
-            collectives.append(current_collective)
-
-    elif mode == "allreduce_butterfly":
-        butterfly_groups = find_butterfly_groups(all_flows)
-        collectives = []
-        for comp in butterfly_groups:
-            s = set(comp)
-            flows = [f for f in all_flows if f["src"] in s]
-            collectives.append(flows)
-
-    else:
-        # 单 collective 情况
-        collectives = [all_flows]
+    node_groups = find_collective_node_groups(all_flows)
+    collectives = []
+    for comp in node_groups:
+        s = set(comp)
+        flows = [f for f in all_flows if f["src"] in s]
+        collectives.append(flows)
 
     return collectives
 

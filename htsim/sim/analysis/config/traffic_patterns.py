@@ -248,6 +248,8 @@ def generate_allreduce_butterfly_traffic(
     if randseed != 0:
         seed(randseed)
 
+    shuffle(srcs)
+
     id = 0
     trig_id = 0
     for group in range(groups):
