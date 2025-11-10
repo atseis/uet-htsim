@@ -27,10 +27,15 @@ experiments:
     exe: htsim_uec
     protocol: uec
     simulation:
-      queue_type: composite_ecn
+      queue_type: composite
   - name: ndp
     exe: htsim_ndp
     protocol: ndp
+    simulation:
+      queue_type: composite
+  - name: roce
+    exe: htsim_roce
+    protocol: roce
     simulation:
       queue_type: composite
 

@@ -5,8 +5,8 @@
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
-#include <iostream>
 #include <filesystem>
+#include <iostream>
 #include "clock.h"
 #include "compositequeue.h"
 #include "connection_matrix.h"
@@ -181,8 +181,8 @@ int main(int argc, char** argv) {
             i++;
         } else if (!strcmp(argv[i], "-log")) {
             if (!strcmp(argv[i + 1], "flow_events")) {
-                log_flow_events = true;
                 cout << "logging flow events\n";
+                log_flow_events = true;
             } else if (!strcmp(argv[i + 1], "sink")) {
                 cout << "logging sinks\n";
                 log_sink = true;
@@ -432,7 +432,7 @@ int main(int argc, char** argv) {
     std::filesystem::path log_path(filename.str());
     std::string idmap_filename = log_path.parent_path().string() + "/idmap.txt";
     if (log_path.parent_path().string().empty()) {
-        idmap_filename = "idmap.txt"; // If no directory, save in current
+        idmap_filename = "idmap.txt";  // If no directory, save in current
     }
 
     cout << "Logging idmap to " << idmap_filename << endl;

@@ -87,9 +87,7 @@ def get_flow_completion_times(
     return run_parse(logfile, ["-ascii", "-filter", "FLOW_EVENT"])
 
 
-def get_sink_goodputs(
-    logfile: str, protocol: Optional[str] = None, flow_ids=[], **kwargs
-) -> str:
+def get_sink_goodputs(logfile: str, protocol: Optional[str] = None, flow_ids=[]) -> str:
     if protocol:
         flags = ["-ascii", "-filter", protocol + "_SINK"]
     else:

@@ -662,7 +662,8 @@ void NdpSrc::processAck(const NdpAck& ack) {
         cout << "Flow " << _name << " flow_id " << flow_id() << " finished at "
              << timeAsUs(eventlist().now()) << " total bytes " << cum_ackno << endl;
         if (_flow_logger) {
-            _flow_logger->logEvent(_flow, *this, FlowEventLogger::FINISH, _flow_size, cum_ackno);
+            uint64_t pkts_num = cum_ackno / _mss;
+            _flow_logger->logEvent(_flow, *this, FlowEventLogger::FINISH, _flow_size, pkts_num);
         }
         if (_end_trigger) {
             _end_trigger->activate();

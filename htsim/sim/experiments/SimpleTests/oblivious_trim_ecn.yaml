@@ -33,5 +33,3 @@ experiments:
       paths: [256, 32]
       q: [1000] # 对于 ecmp_host_ecn，q 仅为 1000
       ecn_thresh: [0.018]
-plots:
-  - CDF-FCT

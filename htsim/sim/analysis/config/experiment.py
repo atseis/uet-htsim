@@ -260,7 +260,8 @@ def run_experiment(
                     val = {**t_var, **s_var}.get(key)
                     if val is not None and not isinstance(val, dict):
                         label_parts.append(f"{key}{val}")
-                label_suffix = "_".join(label_parts) or "default"
+                # label_suffix = "_".join(label_parts) or "default"
+                label_suffix = exp_name + "_".join(label_parts) or exp_name
 
                 out_name = current_exp_results_dir / label_suffix
                 out_name.mkdir(parents=True, exist_ok=True)

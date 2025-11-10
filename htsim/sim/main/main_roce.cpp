@@ -83,6 +83,7 @@ int main(int argc, char** argv) {
 
     uint64_t high_pfc = 15, low_pfc = 12;
 
+    bool log_flow_events = false;
     bool log_sink = false;
     bool log_tor_downqueue = false;
     bool log_tor_upqueue = false;
@@ -156,8 +157,9 @@ int main(int argc, char** argv) {
             cout << "host queue_type " << snd_type << endl;
             i++;
         } else if (!strcmp(argv[i], "-log")) {
-            if (!strcmp(argv[i + 1], "sink")) {
-                log_sink = true;
+            if (!strcmp(argv[i + 1], "flow_events")) {
+                cout << "logging flow events\n";
+                log_flow_events = true;
             } else if (!strcmp(argv[i + 1], "sink")) {
                 cout << "logging sinks\n";
                 log_sink = true;
@@ -383,6 +385,11 @@ int main(int argc, char** argv) {
     if (log_traffic) {
         logfile.addLogger(traffic_logger);
     }
+    FlowEventLoggerSimple* event_logger = NULL;
+    if (log_flow_events) {
+        event_logger = new FlowEventLoggerSimple();
+        logfile.addLogger(*event_logger);
+    }
 
     RoceSrc::setMinRTO(1000);  // increase RTO to avoid spurious retransmits
 
@@ -529,6 +536,10 @@ int main(int argc, char** argv) {
 
         roce_srcs.push_back(roceSrc);
         roceSrc->set_dst(dest);
+
+        if (log_flow_events) {
+            roceSrc->logFlowEvents(*event_logger);
+        }
 
         if (crt->size > 0) {
             roceSrc->set_flowsize(crt->size);
