@@ -1,17 +1,10 @@
-from collections import defaultdict, deque
+from typing import Union
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
-from pandas.errors import OptionError
-import yaml
-
-from ..parser import flow
-from .. import runner
 import pandas as pd
 
-
-import re
+from .. import runner
 
 
 def parse_line_auto(line):
@@ -46,18 +39,17 @@ def is_valid_log_line(line: str) -> bool:
     return True
 
 
-def parse_sink_goodputs(logs: str, flow_ids=[]) -> pd.DataFrame:
+def parse_queue_range(logs: str, ids=[]) -> pd.DataFrame:
     lines = logs.strip().split("\n")
     valid_lines = [l for l in lines if is_valid_log_line(l)]
     rows = [parse_line_auto(l) for l in valid_lines]
     df = pd.DataFrame(rows)
-    if flow_ids:
-        df = df[df["ID"].isin(flow_ids)]
+    if ids:
+        df = df[df["ID"].isin(ids)]
     return df
 
 
-def parse_sink_goodputs_from_file(
-    file_path: str, protocol: Optional[str] = None, flow_ids=[]
-) -> pd.DataFrame:
-    logs = runner.get_sink_goodputs(file_path, protocol)
-    return parse_sink_goodputs(logs, flow_ids)
+def parse_queue_range_from_file(file_path: Union[str, Path], ids=[]) -> pd.DataFrame:
+    file_path = str(file_path)
+    logs = runner.get_queue_range(file_path)
+    return parse_queue_range(logs, ids)

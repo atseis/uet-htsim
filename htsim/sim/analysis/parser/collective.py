@@ -332,6 +332,7 @@ def get_collective_ccts_from_files(
         return []
 
 
+# 这个函数的目的： 用于调试，查看 collective 解析的是否正确
 def get_collective_details_from_directory(
     directory_path: Union[str, Path],
 ) -> List[Dict]:

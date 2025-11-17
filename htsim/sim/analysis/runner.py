@@ -7,7 +7,6 @@ from enum import Enum, auto
 from typing import List, Dict, Optional, Union, Tuple
 
 from numpy import printoptions
-from pandas.core import flags
 
 CURRENT_DIR = Path(__file__).parent
 PROJECT_DIR = CURRENT_DIR.parent
@@ -33,16 +32,22 @@ def run_parse(logfile: str, flags: list = ["-ascii"]) -> str:
 
 def run_sim(bin: str, flags: list = []) -> Dict[str, Union[str, int]]:
     bin_full = BUILD_DIR / bin
+    expanded_flags = []
+    for arg in flags:
+        if isinstance(arg, str) and " " in arg:
+            expanded_flags.extend(arg.split())
+        else:
+            expanded_flags.append(arg)
     if not bin_full.is_file():
         return {
             "stdout": "",
             "stderr": f"binary NOT FOUND: {bin_full.as_posix()}",
             "exit_code": 1,
-            "command": " ".join([bin_full.as_posix()] + flags),
+            "command": " ".join([bin_full.as_posix()] + expanded_flags),
         }
     cmd = [bin_full.as_posix()]
-    if flags:
-        cmd.extend(flags)
+    if expanded_flags:
+        cmd.extend(expanded_flags)
     command_str = " ".join(cmd)
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -55,7 +60,7 @@ def run_sim(bin: str, flags: list = []) -> Dict[str, Union[str, int]]:
     except subprocess.CalledProcessError as e:
         with open(error_log_file, "a") as f:
             cur_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            log_entry = f"[{cur_time}] Command failed: {command_str}\nError: {bin_full.as_posix()}:\n{e.stderr}\n"
+            log_entry = f"[{cur_time}] Command failed: {command_str}\nError: {bin_full.as_posix()}:\n{e.stderr}\n{e.stdout}\n"
             f.write(log_entry)
             print(f"Error written to: {error_log_file}")
         return {
@@ -87,13 +92,16 @@ def get_flow_completion_times(
     return run_parse(logfile, ["-ascii", "-filter", "FLOW_EVENT"])
 
 
-def get_sink_goodputs(logfile: str, protocol: Optional[str] = None, flow_ids=[]) -> str:
+def get_sink_goodputs(logfile: str, protocol: Optional[str] = None) -> str:
     if protocol:
         flags = ["-ascii", "-filter", protocol + "_SINK"]
     else:
         flags = ["-ascii", "-filter", "SINK"]
-    for id in flow_ids:
-        flags.extend(["-filter", f"ID {id}"])
+    return run_parse(logfile, flags)
+
+
+def get_queue_range(logfile: str) -> str:
+    flags = ["-ascii", "-filter", "QUEUE_APPROX", "-filter", "RANGE"]
     return run_parse(logfile, flags)
 
 

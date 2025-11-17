@@ -1,0 +1,30 @@
+common:
+  execute: True
+  traffic:
+    type: serialn_alltoall
+    nodes: 32
+    conns: 32
+    groupsize: 32
+    parallel: 31
+    flowsize: 128MB
+    extrastarttime: 0 
+    randseed: 42
+  simulation:
+    tiers: 2
+    linkspeed: 400000
+    queue_type: lossless_input
+    log:
+      - sink
+      - tor_downqueue
+      - queue_usage
+    logtime: 0.01
+    end: 10000
+    q: 15
+    strat: ecmp
+    paths: 128
+    pfc_thresholds: "12 15"
+
+experiments:
+  - name: ndp
+    exe: htsim_ndp
+    protocol: ndp
