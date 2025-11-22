@@ -6,7 +6,7 @@ common:
     conns: 32
     groupsize: 32
     parallel: 31
-    flowsize: 128MB
+    flowsize: 4MB
     extrastarttime: 0 
     randseed: 42
   simulation:
@@ -19,12 +19,12 @@ common:
       - queue_usage
     logtime: 0.01
     end: 10000
-    q: 15
-    strat: ecmp
+    q: 3640
+    strat: ecmp_host
     paths: 128
-    pfc_thresholds: "12 15"
+    pfc_thresholds: "1800 2900"
 
 experiments:
-  - name: ndp
-    exe: htsim_ndp
-    protocol: ndp
+  - name: roce
+    exe: htsim_roce
+    protocol: roce

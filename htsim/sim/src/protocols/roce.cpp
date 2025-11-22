@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <algorithm>
+#include <cstddef>
 #include <iostream>
 #include "queue.h"
 #include "switch.h"
@@ -37,6 +38,7 @@ RoceSrc::RoceSrc(RoceLogger* logger,
     : BaseQueue(rate, eventlist, NULL), _flow(pktlogger), _logger(logger) {
     _mss = Packet::data_packet_size();
     _end_trigger = NULL;
+    _flow_logger = NULL;
 
     _stop_time = 0;
     _flow_started = false;
@@ -218,10 +220,10 @@ void RoceSrc::processAck(const RoceAck& ack) {
 
     if (ackno * _mss >= _flow_size) {
         cout << "Flow " << _name << " " << get_id() << " finished at "
-             << timeAsUs(eventlist().now()) << " total bytes " << ackno << endl;
+             << timeAsUs(eventlist().now()) << " total bytes " << ackno * _mss << endl;
         _done = true;
         if (_flow_logger) {
-            uint64_t pkts_num = ackno / _mss;
+            uint64_t pkts_num = ackno;
             _flow_logger->logEvent(_flow, *this, FlowEventLogger::FINISH, _flow_size, pkts_num);
         }
         if (_end_trigger) {

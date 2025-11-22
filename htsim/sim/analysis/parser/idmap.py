@@ -86,13 +86,13 @@ def matcher(name: str):
 @matcher("src")
 def match_src(name: str) -> bool:
     # matches all protocol sources: *_<src>_<dest>
-    return bool(re.match(r".+_\d+_\d+$", name))
+    return bool(re.match(r"^[A-Za-z]+_\d+_\d+$", name))
 
 
 @matcher("sink")
 def match_sink(name: str) -> bool:
     # matches all protocol sinks: *_sink_<src>_<dest>
-    return bool(re.match(r".+_sink_\d+_\d+$", name))
+    return bool(re.match(r"[A-Za-z]+_sink_\d+_\d+$", name))
 
 
 @matcher("queue")
@@ -161,12 +161,13 @@ def extract_ids(idmap: Dict[int, str], categories: List[str]) -> List[int]:
 # 基于粗粒度结果进一步过滤
 # 这里的 ids 是通过粗粒度过滤得到
 # RAW functions (based on input id list)
+# src 也从 SINK 事件当中获取
 def raw_src_from(idmap: Dict[int, str], ids: List[int], src_id: int) -> List[int]:
-    return [i for i in ids if int(idmap[i].split("_")[1]) == src_id]
+    return [i for i in ids if int(idmap[i].split("_")[-2]) == src_id]
 
 
 def raw_sink_to(idmap: Dict[int, str], ids: List[int], dest_id: int) -> List[int]:
-    return [i for i in ids if int(idmap[i].split("_")[-1].split("(")[0]) == dest_id]
+    return [i for i in ids if int(idmap[i].split("_")[-1]) == dest_id]
 
 
 def raw_last_hop_queue(idmap: Dict[int, str], ids: List[int]) -> List[int]:
@@ -182,7 +183,7 @@ def raw_queue_by_tor(idmap: Dict[int, str], ids: List[int], tor_id: int) -> List
 # ---------------------
 # Direct filter functions (one-step)
 def filter_src_from(idmap: Dict[int, str], src_id: int) -> List[int]:
-    return raw_src_from(idmap, extract_ids(idmap, ["src"]), src_id)
+    return raw_src_from(idmap, extract_ids(idmap, ["sink"]), src_id)
 
 
 def filter_sink_to(idmap: Dict[int, str], dest_id: int) -> List[int]:
@@ -195,3 +196,32 @@ def filter_last_hop_queue(idmap: Dict[int, str]) -> List[int]:
 
 def filter_queue_by_tor(idmap: Dict[int, str], tor_id: int) -> List[int]:
     return raw_queue_by_tor(idmap, extract_ids(idmap, ["queue"]), tor_id)
+
+
+# -----
+def extract_all_src_sink_ids(idmap: Dict[int, str]):
+    keys = extract_ids(idmap, ["sink"])
+    srcs, sinks = set(), set()
+    for i in keys:
+        src, sink = idmap[i].split("_")[-2], idmap[i].split("_")[-1]
+        srcs.add(int(src))
+        sinks.add(int(sink))
+    return list(srcs), list(sinks)
+
+
+# map: 对于每个节点，在哪些 flow 当中作为 sink
+def get_sink_IDlist_maps(idmap: Dict[int, str]):
+    _, sinks = extract_all_src_sink_ids(idmap)
+    sink_map = {}
+    for sink in sinks:
+        sink_map[sink] = filter_sink_to(idmap, sink)
+    return sink_map
+
+
+# map: 对于每个节点，在哪些 flow 当中作为 src
+def get_src_IDlist_maps(idmap: Dict[int, str]):
+    srcs, _ = extract_all_src_sink_ids(idmap)
+    src_map = {}
+    for src in srcs:
+        src_map[src] = filter_src_from(idmap, src)
+    return src_map
