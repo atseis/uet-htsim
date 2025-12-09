@@ -47,7 +47,7 @@ experiments:
 - **permutation**：`nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`
 - **allreduce**：`nodes`、`conns`、`groupsize`、`flowsize`、`locality`、`randseed`
 - **allreduce_butterfly**：`nodes`、`groups`、`groupsize`、`flowsize`、`locality`、`randseed`
-- **incast**：`nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`
+- **incast**：`nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`、`prefer_remote`
 - **outcast_incast**：`nodes`、`conns_incast`、`conns_outcast`、`flowsize`、`randseed`
 - **permutation_full_bisection**：`nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`
 - **serial_alltoall**：`nodes`、`conns`、`groupsize`、`flowsize`、`extrastarttime`、`randseed`
@@ -59,8 +59,13 @@ experiments:
 使用以下命令运行实验：
 
 ```bash
-python examples.py <config>.yaml
+python run.py <config>.yaml
 ```
+
+可选参数：
+
+- `--force` 强制重跑所有子实验，忽略已存在的 `status.yaml` 状态
+- `--continue` 在某个子实验失败后继续执行其他子实验
 
 ## 工作流程
 
@@ -86,7 +91,7 @@ python examples.py <config>.yaml
 
 - **`exe` 和 `protocol` 字段**：
     - `exe` 字段（例如 `htsim_ndp`）用于指定要运行的模拟器可执行文件的名称，系统会在 `BUILD_DIR` 下寻找该二进制文件。
-    - `protocol` 字段（例如 `ndp`）用于在生成输出文件名时提供一个前缀，帮助区分不同协议的实验结果。
+    - `protocol` 字段（例如 `ndp`）可用于人类可读的区分，但当前批量运行逻辑不会将该字段纳入自动命名或命令行参数。
 
 ## 注意事项
 

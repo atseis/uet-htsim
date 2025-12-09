@@ -19,29 +19,25 @@
 common:
   traffic:
     type: permutation
-    params:
-      nodes: 8192
-      conns: 8192
-      flowsize: "2MB"
-      extrastarttime: 0
-      randseed: 13
+    nodes: 8192
+    conns: 8192
+    flowsize: "2MB"
+    extrastarttime: 0
+    randseed: 13
   simulation:
-    params:
-      linkspeed: 100000
-      strat: ecmp
+    linkspeed: 100000
+    strat: ecmp
 
 experiments:
   - name: ndp_experiment_example
     exe: htsim_ndp
     protocol: ndp
     traffic:
-      params:
-        conns: [16, 32] # 列表参数将进行笛卡尔积组合
+      conns: [16, 32] # 列表参数将进行笛卡尔积组合
     simulation:
-      params:
-        paths: [32, 256] # 列表参数将进行笛卡尔积组合
-        q: [35, 1000]
-        ecn_thresh: [0.018] # 仅当 strat 支持 ECN 时有效
+      paths: [32, 256] # 列表参数将进行笛卡尔积组合
+      q: [35, 1000]
+      ecn_thresh: [0.018] # 仅当 strat 支持 ECN 时有效
     plot_settings: # 绘图设置 (可选)
       cdf-fct:
         x_range_auto: true
@@ -75,13 +71,13 @@ experiments:
 
 -   **`name`**: (字符串) 实验的名称，用于生成输出文件和目录名。
 -   **`exe`**: (字符串) 指定要运行的模拟器可执行文件的名称（例如 `htsim_ndp`）。系统会在 `BUILD_DIR` 下寻找该二进制文件。
--   **`protocol`**: (字符串) 协议名称（例如 `ndp`），用于在生成输出文件名时提供一个前缀，帮助区分不同协议的实验结果。
+-   **`protocol`**: (字符串) 协议名称（例如 `ndp`）。用于人类可读的区分；当前实现不会将其自动纳入输出目录命名或命令行参数。
 -   **`traffic`**: (字典) 覆盖或扩展 `common.traffic` 中的设置。
     -   **`type`**: (可选，字符串) 覆盖 `common.traffic.type`。
     -   **`params`**: (可选，字典) 覆盖或扩展 `common.traffic.params`。
 -   **`simulation`**: (字典) 覆盖或扩展 `common.simulation` 中的设置。
     -   **`params`**: (可选，字典) 覆盖或扩展 `common.simulation.params`。
--   **`execute`**: (可选，布尔值，默认为 `True`) 如果设置为 `True`，则会实际运行模拟器；否则，只会打印出将要执行的模拟命令。
+-   **`execute`**: (可选，布尔值，默认 `False`) 若为 `True` 则实际运行模拟器；若为 `False` 则进行 dry-run（仅打印命令）。可在 `common` 或具体实验项中显式开启。
 -   **`plot_settings`**: (可选，字典) 定义该实验生成的绘图的特定设置。
     -   **`cdf-fct`**: (字典) 针对 FCT CDF 图表的设置。
         -   **`x_range_auto`**: (布尔值，默认为 `false`) 如果为 `true`，系统将自动识别数据范围并进行扩展（例如，将 CDF-FCT 图表的范围从 5-10 扩展到 4-12）。
@@ -94,22 +90,12 @@ experiments:
 -   **参数展开规则**:
     -   `expand_params_tree` 函数会递归地遍历参数字典。
     -   对于非特殊键（如 `params` 和 `log`），如果其值是列表，则会与当前已有的组合进行笛卡尔积展开。
-    -   **特殊处理 `params` 键**: 如果一个字典中包含 `params` 键，且其值是一个列表，这允许定义更复杂的参数组合逻辑，而非简单的笛卡尔积。`params` 字段内的每个元素都被视为一个独立的参数组，这些组将与外部参数进行组合。
+    -   **特殊处理 `params` 键**: `params` 键用于定义更复杂的参数组合逻辑，而非简单的笛卡尔积。当需要将一组参数作为一个整体进行组合时，可以使用 `params` 键。例如，比较不同路由策略时，某些策略可能包含其他策略没有的参数。
         -   如果 `params` 的值是 `list[dict]`（例如 `params: [{p1: v1}, {p2: v2}]`），这被视为一个参数组的列表，其中的每个字典都会与外部参数进行组合。
-        -   如果 `params` 的值是 `list[list[dict]]`（例如 `params: [[{p1: v1}, {p2: v2}], [{p3: v3}]]`），则会先对内部的 `list[dict]` 进行笛卡尔积组合，然后再与外部参数组合。这允许定义更复杂的参数组合逻辑，例如比较不同路由策略时，某些策略可能包含其他策略没有的参数。
+        -   如果 `params` 的值是 `list[list[dict]]`（例如 `params: [[{p1: v1}, {p2: v2}], [{p3: v3}]]`），则会先对内部的 `list[dict]` 进行笛卡尔积组合，然后再与外部参数组合。这允许定义更复杂的参数组合逻辑，例如比较不同拓扑规模（如 432 节点和 1024 节点）时，可以灵活地定义参数组合。对于简单的列表参数，可以直接放在 `traffic` 或 `simulation` 下，无需使用 `params` 键。键。
     -   **示例**:
         -   简单列表展开：如果 `paths: [32, 256]` 和 `q: [35, 1000]`，则会生成 `(paths=32, q=35)`、`(paths=32, q=1000)`、`(paths=256, q=35)`、`(paths=256, q=1000)` 四种组合。
-        -   `params` 键的特殊展开：
-            ```yaml
-            simulation:
-              params:
-                - paths: [32, 256]
-                  q: 35
-                - paths: 128
-                  q: [1000, 2000]
-            ```
-            这会生成 `(paths=32, q=35)`、`(paths=256, q=35)`、`(paths=128, q=1000)`、`(paths=128, q=2000)` 四种组合。
-        -   结合 `spray_comparison.yaml` 的 `params` 示例：
+        -   `params` 键的示例：
             ```yaml
             traffic:
               randseed: [13]
@@ -135,7 +121,7 @@ experiments:
 -   **`permutation`**: `nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`
 -   **`allreduce`**: `nodes`、`conns`、`groupsize`、`flowsize`、`locality`、`randseed`
 -   **`allreduce_butterfly`**: `nodes`、`groups`、`groupsize`、`flowsize`、`locality`、`randseed`
--   **`incast`**: `nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`
+-   **`incast`**: `nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`、`prefer_remote`
 -   **`outcast_incast`**: `nodes`、`conns_incast`、`conns_outcast`、`flowsize`、`randseed`
 -   **`permutation_full_bisection`**: `nodes`、`conns`、`flowsize`、`extrastarttime`、`randseed`
 -   **`serial_alltoall`**: `nodes`、`conns`、`groupsize`、`flowsize`、`extrastarttime`、`randseed`
@@ -298,8 +284,13 @@ experiments:
 使用 `run.py` 脚本运行实验：
 
 ```bash
-python run.py <config>.yaml
+python run.py <config>.yaml [--force] [--continue]
 ```
+
+说明：
+
+- `--force` 强制重跑所有子实验（忽略已完成或运行中的状态）。
+- `--continue` 某个子实验失败时继续运行其余实验。
 
 其中 `<config>.yaml` 是您的实验配置文件路径。
 
