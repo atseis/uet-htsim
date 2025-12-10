@@ -36,8 +36,8 @@ if __name__ == "__main__":
         print("未找到流事件，请检查日志文件")
         sys.exit(1)
 
-    # 计算FCT
-    df = compute_fct(df)
+    # # 计算FCT
+    # df = compute_fct(df)
 
     # 保存到CSV
     csv_path = os.path.join(args.output_dir, "fct.csv")

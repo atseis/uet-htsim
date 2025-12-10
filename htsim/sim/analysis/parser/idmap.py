@@ -5,23 +5,6 @@ from pathlib import Path
 FLOW_PATTERN = re.compile(r"^([^_]+)_([0-9]+)_([0-9]+)$")
 
 
-def get_idmap_path(path: Union[str, Path]) -> Path:
-    p = Path(path)
-
-    if p.is_dir():
-        candidate = p / "idmap.txt"
-        if candidate.is_file():
-            return candidate
-    elif p.is_file():
-        candidate = p.parent / "idmap.txt"
-        if candidate.is_file():
-            return candidate
-    else:
-        raise FileNotFoundError(f"Path {path} 不存在")
-
-    raise FileNotFoundError(f"idmap.txt 未在路径 {p} 中找到")
-
-
 def read_idmap(idmap_path: Path) -> Dict[int, str]:
     """
     读取 idmap.txt 文件，返回 {id: name} 字典
