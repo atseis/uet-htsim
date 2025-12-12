@@ -16,6 +16,11 @@ class ExperimentResult:
     1. 自动定位关键文件路径。
     2. 惰性加载：只有在访问数据属性（如 .flow_df, .status_vars）时才读取文件。
     3. 自动缓存：读取一次后存储在内存中，多次访问不消耗 IO。
+
+    格式规定：
+    1. 区别两种 id: 小写 id 表示模拟运行中的各种 id; 大写 ID 表示 Logged 分配的、日志中查看到的 ID
+        id: 比如 flowid 24, Uec_304_0 中的 304 和 0 就是 id
+        ID: 使用 parse_output 从日志中读取到的就是 ID，idmap 中的 key 都是 ID
     """
 
     # 关键文件名定义
@@ -110,11 +115,11 @@ class ExperimentResult:
     # 3. 业务辅助方法
     # ==========================
 
-    def get_config(self, key: str, default=None):
+    def get_status_vars(self, key: str, default=None):
         """便捷获取 status.yaml 中的配置项"""
         return self.status_vars.get(key, default)
 
-    def get_name_by_logid(self, log_id) -> Optional[str]:
+    def get_name_by_LogID(self, log_id) -> Optional[str]:
         """根据 Log ID 获取名称"""
         return self.idmap.get(log_id)
 
@@ -139,8 +144,8 @@ class ExperimentResult:
         return None
 
     def get_flowid_by_logid(self, log_id) -> Optional[int]:
-        """根据 log_id 查找 flowid (级联查找)"""
-        name = self.get_name_by_logid(log_id)
+        """根据 LogID 查找 flowid (级联查找)"""
+        name = self.get_name_by_LogID(log_id)
         if name:
             return self.get_flowid_by_name(name)
         return None
