@@ -368,6 +368,18 @@ def run_experiment(
                     end_time = datetime.datetime.now()
                     dur = (end_time - start_time).total_seconds()
                     durations.append(dur)
+                    # ========[新增] 保存 cout/printf 输出========================
+                    console_log_path = task["out_name"] / "stdout.log"
+                    stdout_content = run_result.get("stdout", "")
+                    if stdout_content:
+                        try:
+                            with open(console_log_path, "w", encoding="utf-8") as f:
+                                f.write(str(stdout_content))
+                        except TypeError:
+                            with open(console_log_path, "wb") as f:
+                                f.write(stdout_content)
+
+                    # ============================================================
                     if run_result["exit_code"] == 0:
                         success += 1
                         status.update_status(

@@ -380,6 +380,7 @@ def generate_incast_traffic(
             srcs.append(n)
         if randseed != 0:
             seed(randseed)
+        shuffle(srcs)
     # 目标节点固定，为 0
     dst = "0"
     for n in range(conns):

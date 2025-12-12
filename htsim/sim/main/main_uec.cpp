@@ -263,6 +263,10 @@ int main(int argc, char** argv) {
         } else if (!strcmp(argv[i], "-debug")) {
             UecSrc::_debug = true;
             UecPdcSes::_debug = true;
+        } else if (!strcmp(argv[i], "-debug_flowid")) {
+            UecSrc::_debug_flowid = atoi(argv[i + 1]);
+            cout << "debug_flowid" << UecSrc::_debug_flowid << endl;
+            i++;
         } else if (!strcmp(argv[i], "-host_queue_type")) {
             if (!strcmp(argv[i + 1], "swift")) {
                 snd_type = SWIFT_SCHEDULER;

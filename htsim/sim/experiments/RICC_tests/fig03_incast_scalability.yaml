@@ -9,7 +9,7 @@ common:
     # conns: (将在 experiment 中通过列表定义，触发简单笛卡尔积)
     flowsize: "50KB"    # 模拟推理微突发 Token
     extrastarttime: 0   # 0 = 绝对同步启动
-    randseed: 42
+    randseed: 4
     prefer_remote: 1    # 优先跨机架
 
   # 2. 模拟环境通用参数

@@ -1,0 +1,63 @@
+common:
+  execute: True
+  
+  # 1. 流量生成通用参数
+  # 修正：直接放在 traffic 下，不要套 params
+  traffic:
+    type: incast
+    nodes: 432
+    # conns: (将在 experiment 中通过列表定义，触发简单笛卡尔积)
+    flowsize: "50KB"    # 模拟推理微突发 Token
+    extrastarttime: 0   # 0 = 绝对同步启动
+    randseed: 4
+    prefer_remote: 1    # 优先跨机架
+
+  # 2. 模拟环境通用参数
+  # 修正：直接放在 simulation 下
+  simulation:
+    # --- 拓扑与链路 ---
+    tiers: 3
+    linkspeed: 100000   # 100Gbps
+    mtu: 4150
+    
+    # --- 延迟参数 ---
+    hop_latency: 1
+    switch_latency: 0
+    
+    # --- 路由与多路径 ---
+    strat: ecmp_host            # 交换机 ECMP
+    load_balancing_algo: mixed  # UEC Host Spraying
+    paths: 64                   # 路径熵
+    
+    # --- 日志与时间 ---
+    logtime: 0.1
+    end: 2000                   # 2ms 结束
+    log:
+      - sink
+      - flow_events
+
+# 3. 绘图配置
+plots:
+  - CDF-FCT
+  - AvgFCT-Nodes
+
+# 4. 实验组定义
+experiments:
+  - name: uec_baseline_incast
+    exe: htsim_uec
+    protocol: uec
+    
+    # 扫描变量：Incast 并发度
+    # 系统会自动对列表进行笛卡尔积展开
+    traffic:
+      conns: [16, 32, 64, 96, 128]
+
+    # 算法参数：NSCC 基线
+    simulation:
+      sender_cc_algo: nscc
+      target_q_delay: 12
+      queue_size_bdp_factor: 8
+      queue_type: composite
+      # 开启 ECN
+      ecn: "20 80"
+      sleek: " "
