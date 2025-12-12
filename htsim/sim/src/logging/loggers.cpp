@@ -64,6 +64,7 @@ string QueueLoggerSimple::event_to_str(RawLogEvent& event) {
     stringstream ss;
     ss << fixed << setprecision(9) << event._time;
     assert(event._type == Logger::QUEUE_EVENT);
+    ss << " Type QUEUE_EVENT";
     ss << " ID " << event._id;
     switch (event._ev) {
         case QueueLogger::PKT_ENQUEUE:
@@ -869,8 +870,8 @@ string TcpLoggerSimple::event_to_str(RawLogEvent& event) {
     ss << fixed << setprecision(9) << event._time;
     switch (event._type) {
         case TcpLogger::TCP_EVENT:
-            ss << " Type TCP  ID " << event._id << " Ev " << event._ev << "Cwnd "
-               << (int)event._val1 << "Unacked " << (int)event._val2 << "SSthresh "
+            ss << " Type TCP  ID " << event._id << " Ev " << event._ev << " Cwnd "
+               << (int)event._val1 << " Unacked " << (int)event._val2 << " SSthresh "
                << (int)event._val3;
             break;
         case TcpLogger::TCP_STATE:
@@ -973,7 +974,7 @@ string AggregateTcpLogger::event_to_str(RawLogEvent& event) {
     stringstream ss;
     ss << fixed << setprecision(9) << event._time;
     assert(event._type == TCP_RECORD);
-    ss << " Type=TCP_RECORD ID=" << event._id;
+    ss << " Type TCP_RECORD ID " << event._id;
     assert(event._ev == TcpLogger::AVE_CWND);
     ss << " Ev AVE_CWND Cwnd " << setprecision(2) << event._val1 << " Unacked " << event._val2
        << " EffCwnd " << event._val3;
@@ -1571,7 +1572,7 @@ string QcnLoggerSimple::event_to_str(RawLogEvent& event) {
     ss << fixed << setprecision(9) << event._time;
     switch (event._type) {
         case Logger::QCN_EVENT:
-            ss << "Type QCN Id " << event._id;
+            ss << " Type QCN ID " << event._id;
             switch (event._ev) {
                 case QCN_SEND:
                     ss << " Ev SEND";
@@ -1596,7 +1597,7 @@ string QcnLoggerSimple::event_to_str(RawLogEvent& event) {
                << event._val3;
             break;
         case Logger::QCNQUEUE_EVENT:
-            ss << "Type QCNQUEUE Id " << event._id;
+            ss << " Type QCNQUEUE ID " << event._id;
             switch (event._ev) {
                 case QCN_FB:
                     ss << " Ev FB";

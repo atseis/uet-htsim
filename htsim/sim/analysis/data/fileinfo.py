@@ -85,12 +85,12 @@ class ExperimentResult:
             return {}
         return statusyaml.parse_variables(self.status_path)
 
-    @cached_property
-    def idmap_data(self) -> Dict:
-        """解析 idmap.txt，返回 {id: name} 映射"""
-        if not self.idmap_path.exists():
-            return {}
-        return idmap.read_idmap(self.idmap_path)
+    # @cached_property
+    # def idmap_data(self) -> Dict:
+    #     """解析 idmap.txt，返回 {id: name} 映射"""
+    #     if not self.idmap_path.exists():
+    #         return {}
+    #     return idmap.read_idmap(self.idmap_path)
 
     @cached_property
     def flow_df(self) -> pd.DataFrame:
@@ -102,6 +102,10 @@ class ExperimentResult:
             return pd.DataFrame()
         return flow.parse_flow_events_from_file(self.log_path.as_posix())
 
+    @cached_property
+    def idmap(self) -> idmap.IdMap:
+        return idmap.IdMap(self.idmap_path)
+
     # ==========================
     # 3. 业务辅助方法
     # ==========================
@@ -112,7 +116,7 @@ class ExperimentResult:
 
     def get_name_by_logid(self, log_id) -> Optional[str]:
         """根据 Log ID 获取名称"""
-        return self.idmap_data.get(log_id)
+        return self.idmap.get(log_id)
 
     def get_flowid_by_name(self, target_name: str) -> Optional[int]:
         """
@@ -140,4 +144,3 @@ class ExperimentResult:
         if name:
             return self.get_flowid_by_name(name)
         return None
-

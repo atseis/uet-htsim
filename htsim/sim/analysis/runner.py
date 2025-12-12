@@ -101,6 +101,9 @@ def get_sink_goodputs(logfile: str, protocol: Optional[str] = None) -> str:
 
 
 def get_queue_range(logfile: str) -> str:
+    # 在当前的实现当中（QueueLoggerSampling::doNextEvent()） ，type 都是 QUEUE_APPROX
+    # 区别只体现在在 ev 上（目前包含 QUEUE_RANGE, QUEUE_OVERFLOW）
+    # 具体数据结构可见 QueueLogger
     flags = ["-ascii", "-filter", "QUEUE_APPROX", "-filter", "RANGE"]
     return run_parse(logfile, flags)
 
