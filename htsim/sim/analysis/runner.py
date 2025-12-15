@@ -108,6 +108,47 @@ def get_queue_range(logfile: str) -> str:
     return run_parse(logfile, flags)
 
 
+# src/runner.py (添加在文件末尾或 get_queue_range 附近)
+
+
+def get_queue_events(logfile: str, queue_id: Optional[int] = None) -> str:
+    """
+    获取 QueueLoggerSimple 的原始事件日志 (QUEUE_EVENT)。
+    对应 parse_output -filter QUEUE_EVENT
+
+    Args:
+        logfile: 日志文件路径
+        queue_id: (可选) 如果指定，则通过 grep 进一步筛选特定 ID，减少数据量
+    """
+    # 基础参数: 获取所有 QUEUE_EVENT
+    # 注意: parse_output 的 QUEUE_EVENT 对应 id=0, ev=0
+    flags = ["-ascii", "-filter", "QUEUE_EVENT"]
+
+    # 获取原始输出
+    output = run_parse(logfile, flags)
+
+    # 如果指定了 queue_id，可以在 Python 层面做一次简单的过滤
+    # (或者如果 parse_output 支持针对 ID 的 filter 更好，但目前看代码似乎只支持字符串 filter)
+    if queue_id is not None:
+        # 简单过滤: 只保留包含 "ID <queue_id> " 的行
+        target = f"ID {queue_id} "
+        filtered_lines = [line for line in output.splitlines() if target in line]
+        return "\n".join(filtered_lines)
+
+    return output
+
+
+def get_queue_cum_traffic(logfile: str) -> str:
+    """
+    [新增] 获取 QueueLoggerSampling 的累积时间统计数据。
+    对应 Ev CUM_TRAFFIC
+    注意：需确认 C++ output log 中是否正确输出了浮点数，否则全为 0。
+    """
+    # 过滤关键字：Type QUEUE_APPROX ... Ev CUM_TRAFFIC
+    flags = ["-ascii", "-filter", "QUEUE_APPROX", "-filter", "CUM_TRAFFIC"]
+    return run_parse(logfile, flags)
+
+
 def load_idmap(filepath: str) -> dict[int, str]:
     mapping = {}
     with open(filepath, "r", encoding="utf-8") as f:

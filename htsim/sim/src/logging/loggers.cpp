@@ -284,14 +284,14 @@ string QueueLoggerSampling::event_to_str(RawLogEvent& event) {
             ss << " ID " << event._id;
             switch (event._ev) {
                 case QUEUE_RANGE:
-                    ss << " Ev RANGE LastQ " << (int)event._val1 << " MinQ " << (int)event._val2
-                       << " MaxQ " << (int)event._val3;
+                    ss << " Ev RANGE LastQ " << event._val1 << " MinQ " << event._val2 << " MaxQ "
+                       << event._val3;
                     if (event._name != "")
                         ss << " Name " << event._name;
                     break;
                 case QUEUE_OVERFLOW:
-                    ss << " Ev OVERLOW LastIdled " << (int)event._val1 << " LastDropped "
-                       << (int)event._val2 << " QueueBuf " << (int)event._val3;
+                    ss << " Ev OVERLOW LastIdled " << event._val1 << " LastDropped " << event._val2
+                       << " QueueBuf " << event._val3;
                     if (event._name != "")
                         ss << " Name " << event._name;
                     break;
@@ -303,8 +303,8 @@ string QueueLoggerSampling::event_to_str(RawLogEvent& event) {
             ss << " Type QUEUE_APPROX";
             ss << " ID " << event._id;
             assert(event._ev == QueueLogger::CUM_TRAFFIC);
-            ss << " Ev CUM_TRAFFIC CumArr " << (int)event._val1 << " CumIdle " << (int)event._val2
-               << " CumDrop " << (int)event._val3;
+            ss << " Ev CUM_TRAFFIC CumArr " << event._val1 << " CumIdle " << event._val2
+               << " CumDrop " << event._val3;
             if (event._name != "")
                 ss << " Name " << event._name;
             break;

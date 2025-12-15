@@ -306,7 +306,7 @@ class IdMap:
     # ----------------------------------------------------
     # 功能 A: 基于枚举的类型筛选
     # ----------------------------------------------------
-    def filter_queues(self, link_type: LinkType) -> List[int]:
+    def filter_queueIDs(self, link_type: LinkType) -> List[int]:
         """
         根据链路类型筛选 Queue ID。
 
@@ -316,7 +316,7 @@ class IdMap:
         pattern = re.compile(link_type.value)
         return [gid for gid in self.queueIDs if pattern.match(self.data[gid])]
 
-    def filter_pipes(self, link_type: LinkType) -> List[int]:
+    def filter_pipeIDs(self, link_type: LinkType) -> List[int]:
         """
         根据链路类型筛选 Pipe ID。
 
