@@ -24,8 +24,8 @@ common:
     log:
       - sink
       - flow_events
-      - traffic
       - tor_downqueue
+      - nic
     debug: " "
 
 experiments:

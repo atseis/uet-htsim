@@ -5,7 +5,7 @@ from functools import cached_property
 import pandas as pd
 
 # 假设这些是你现有的 parser 模块
-from ..parser import idmap, statusyaml, flow, queue
+from ..parser import idmap, statusyaml, flow, queue, sink, nic
 
 
 class ExperimentResult:
@@ -31,8 +31,9 @@ class ExperimentResult:
         "stdout": "stdout.log",
     }
 
-    def __init__(self, path: Union[str, Path]):
+    def __init__(self, path: Union[str, Path], rate_unit: str = "Gbps"):
         self.base_dir = self._resolve_base_dir(path)
+        self.rate_unit = rate_unit
         self._validate_files()
 
     def _resolve_base_dir(self, path: Union[str, Path]) -> Path:
@@ -106,6 +107,127 @@ class ExperimentResult:
         if not self.log_path.exists():
             return pd.DataFrame()
         return flow.parse_flow_events_from_file(self.log_path.as_posix())
+
+    @cached_property
+    def nic_df(self) -> pd.DataFrame:
+        """
+        [新增 Insight] NIC 级吞吐量监控 (Per NIC Throughput).
+
+        包含指标:
+        - rx_data: 有效数据接收速率 (Goodput-like)
+        - rx_total: 总接收速率 (含包头/重传)
+        - rx_trim: 被 Trim (截断) 的速率
+        """
+        if not self.log_path.exists():
+            return pd.DataFrame()
+
+        # 1. 解析原始数据
+        df = nic.parse_nic_events_from_file(self.log_path.as_posix())
+        if df.empty:
+            return df
+
+        # 2. 自动单位转换 (Bps -> Gbps/Mbps)
+        # NIC Log 原始单位为 Bytes/sec
+        factor = 8 / 1e9 if self.rate_unit == "Gbps" else 8 / 1e6
+        suffix = self.rate_unit
+
+        for col in ["rx_data_bps", "rx_total_bps", "rx_trim_bps"]:
+            new_col = col.replace("_bps", f"_{suffix}")
+            df[new_col] = df[col] * factor
+
+        return df
+
+    @cached_property
+    def _raw_sink_df(self) -> pd.DataFrame:
+        """
+        [基础数据] 解析原始 Goodput 日志 (Per Flow)。
+        虽然这只是"翻译"，但它是后续聚合的基础。
+        """
+        if not self.log_path.exists():
+            return pd.DataFrame()
+        # 获取全量数据，不进行 ID 过滤
+        return sink.parse_goodputs_from_file(self.log_path.as_posix())
+
+    @cached_property
+    def flow_goodput_df(self) -> pd.DataFrame:
+        """
+        [别名] 访问原始流级 Goodput 数据。
+        """
+        return self._raw_sink_df
+
+    def _convert_rate(self, df: pd.DataFrame) -> pd.DataFrame:
+        """根据配置自动添加带单位的 Rate 列"""
+        if df.empty or "Rate" not in df.columns:
+            return df
+
+        # 原始 Rate 单位为 Bps
+        col_name = f"Rate_{self.rate_unit}"
+        if self.rate_unit == "Gbps":
+            df[col_name] = df["Rate"] * 8 / 1e9
+        elif self.rate_unit == "Mbps":
+            df[col_name] = df["Rate"] * 8 / 1e6
+        return df
+
+    @cached_property
+    def sink_goodput_df(self) -> pd.DataFrame:
+        """
+        [核心 Insight] 节点级接收吞吐量 (Per Sink Node Goodput)。
+
+        价值：
+        1. 直接反映每个 Server 的接收压力。
+        2. 识别 Incast 场景下的 Victim (谁的吞吐量被压垮了)。
+        3. 评估负载均衡 (是不是所有节点的接收速率都均匀)。
+        """
+        df = self._raw_sink_df
+        if df.empty:
+            return pd.DataFrame()
+
+        # 1. 获取映射: {SinkNodeID -> [FlowID1, FlowID2...]}
+        # idmap 已经帮我们做好了这个映射
+        node_map = self.idmap.sink_id_to_flowIDs_map
+
+        if not node_map:
+            return pd.DataFrame()
+
+        # 2. 调用 sink.py 的聚合逻辑
+        # Returns: DataFrame [time, CAck, Rate, nodeID]
+        agg_df = sink.aggregate_by_node_map(df, node_map)
+        return self._convert_rate(agg_df)  # 自动注入 Rate_Gbps
+
+    @cached_property
+    def src_goodput_df(self) -> pd.DataFrame:
+        """
+        [扩展 Insight] 源端有效发送速率 (Per Source Node Goodput)。
+        注意：这是基于 Sink 端的 ACK 计算的，代表"有效"传输速率，而非网卡发送速率。
+        """
+        df = self._raw_sink_df
+        if df.empty:
+            return pd.DataFrame()
+
+        # 1. 获取映射: {SrcNodeID -> [FlowID1, FlowID2...]}
+        node_map = self.idmap.src_id_to_flowIDs_map
+
+        if not node_map:
+            return pd.DataFrame()
+
+        agg_df = sink.aggregate_by_node_map(df, node_map)
+        return self._convert_rate(agg_df)  # 自动注入 Rate_Gbps
+
+    @cached_property
+    def total_goodput_df(self) -> pd.DataFrame:
+        """
+        [全局 Insight] 整个系统的总吞吐量随时间变化。
+        """
+        df = self._raw_sink_df
+        if df.empty:
+            return pd.DataFrame()
+
+        # 聚合所有流 ID
+        all_ids = df["ID"].unique().tolist()
+
+        # 复用 aggregate_by_ids
+        agg_df = sink.aggregate_by_ids(df, all_ids)
+        return self._convert_rate(agg_df)  # 自动注入 Rate_Gbps
 
     # ==========================
     # Modified: 核心数据解析 (重构 Queue/Switch 分离)
@@ -233,40 +355,75 @@ class ExperimentResult:
     # ==========================
 
     def _clean_sampling_df(
-        self, df: pd.DataFrame, value_col: str = "max_q"
+        self, df: pd.DataFrame, value_col: str = "max_q", id_col: str = "queue_id"
     ) -> pd.DataFrame:
         """
-        [内部通用] 清洗采样数据 (Queue 或 Switch)。
+        [内部通用] 清洗采样数据 (Queue, Switch 或 NIC)。
         逻辑：
-        1. 剔除全程 value_col (如 max_q) 均为 0 的 ID。
+        1. 剔除全程 value_col (如 max_q 或 rx_total) 均为 0 的 ID。
         2. 裁剪掉最后一次活跃之后的时间段 (Tail Trimming)。
+        
+        Args:
+            df: 原始 DataFrame
+            value_col: 用于判断活跃度的数值列名
+            id_col: 用于分组的 ID 列名 (queue_id, nic_id 等)
         """
         if df.empty:
             return df
+        
+        # 确保 id_col 存在
+        if id_col not in df.columns:
+            return df
 
-        # 1. 剔除“死对象”
-        # 这里的 queue_id 是泛指 (Queue ID 或 Switch ID)
-        peaks = df.groupby("queue_id")[value_col].max()
+        # 1. 剔除“死对象” (全程无值)
+        peaks = df.groupby(id_col)[value_col].max()
         active_ids = peaks[peaks > 0].index
 
         if len(active_ids) == 0:
             return pd.DataFrame(columns=df.columns)
 
-        df_active = df[df["queue_id"].isin(active_ids)].copy()
+        # 保留活跃 ID 的所有数据 (保留原始列，包括可能存在的 Name)
+        df_active = df[df[id_col].isin(active_ids)].copy()
 
-        # 2. 尾部裁剪
-        # 找出所有活跃时刻
+        # 2. 尾部裁剪 (Tail Trimming)
+        # 找出所有活跃时刻 (value > 0)
         active_events = df_active[df_active[value_col] > 0]
+        
+        if active_events.empty:
+             return pd.DataFrame(columns=df.columns)
 
         # 找出每个 ID 的“最后活跃时间”
-        cutoff_times = active_events.groupby("queue_id")["time"].max().reset_index()
+        cutoff_times = active_events.groupby(id_col)["time"].max().reset_index()
         cutoff_times.rename(columns={"time": "cutoff_time"}, inplace=True)
 
         # 合并并过滤
-        df_merged = df_active.merge(cutoff_times, on="queue_id", how="left")
+        df_merged = df_active.merge(cutoff_times, on=id_col, how="left")
+        # 保留 time <= cutoff_time 的行
         df_clean = df_merged[df_merged["time"] <= df_merged["cutoff_time"]]
 
         return df_clean.drop(columns=["cutoff_time"]).reset_index(drop=True)
+
+    # ==========================
+    # NIC Active Data
+    # ==========================
+
+    @cached_property
+    def active_nic_df(self) -> pd.DataFrame:
+        """
+        [智能清洗] 获取“有效”的 NIC 数据。
+        
+        注意：nic_df 中的 nic_id 是 Source Node ID (模拟器内部 ID)，
+        并非全局 LogID，因此不能关联 idmap 获取名称。
+        """
+        df = self.nic_df
+        if df.empty:
+            return df
+
+        # 确定活跃指标列名 (自适应 rate_unit)
+        target_col = f"rx_total_{self.rate_unit}"
+        
+        # 调用通用清洗逻辑，指定 ID 列为 nic_id
+        return self._clean_sampling_df(df, value_col=target_col, id_col="nic_id")
 
     @cached_property
     def active_queue_df(self) -> pd.DataFrame:
@@ -388,3 +545,55 @@ class ExperimentResult:
         if name:
             return self.get_flowid_by_name(name)
         return None
+
+    # ==========================
+    # 5. 增强的拓扑筛选接口 (Topology Filtering)
+    # ==========================
+
+    def get_queues_by_type(self, link_type_enum) -> pd.DataFrame:
+        """
+        [高级筛选] 根据链路类型筛选队列数据。
+
+        Args:
+            link_type_enum: idmap.LinkType 枚举值 (e.g., idmap.LinkType.TOR_DOWN)
+
+        Returns:
+            筛选后的 pd.DataFrame (格式同 active_queue_df)
+
+        Example:
+            tor_down_df = result.get_queues_by_type(idmap.LinkType.TOR_DOWN)
+        """
+        # 1. 获取有效数据源
+        df = self.active_queue_df
+        if df.empty:
+            return df
+
+        # 2. 利用 IdMap 进行 ID 筛选
+        # 注意：这里调用的是 idmap 实例的 filter_queueIDs 方法
+        target_ids = set(self.idmap.filter_queueIDs(link_type_enum))
+
+        if not target_ids:
+            return pd.DataFrame(columns=df.columns)
+
+        # 3. 返回过滤结果
+        return df[df["queue_id"].isin(target_ids)].reset_index(drop=True)
+
+    @property
+    def tor_downlink_queues(self) -> pd.DataFrame:
+        """[快捷属性] ToR -> Server 的下行队列 (Last Hop)"""
+        return self.get_queues_by_type(idmap.LinkType.TOR_DOWN)
+
+    @property
+    def agg_downlink_queues(self) -> pd.DataFrame:
+        """[快捷属性] Aggregation -> ToR 的下行队列"""
+        return self.get_queues_by_type(idmap.LinkType.AGG_DOWN)
+
+    @property
+    def core_downlink_queues(self) -> pd.DataFrame:
+        """[快捷属性] Core -> Aggregation 的下行队列"""
+        return self.get_queues_by_type(idmap.LinkType.CORE_DOWN)
+
+    @property
+    def server_uplink_queues(self) -> pd.DataFrame:
+        """[快捷属性] Server -> ToR 的上行队列 (Injection)"""
+        return self.get_queues_by_type(idmap.LinkType.SERVER_UP)
