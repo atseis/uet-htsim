@@ -13,7 +13,7 @@ from .. import runner
 def parse_sampling_events(text: str) -> pd.DataFrame:
     """
     解析 QueueLoggerSampling 产生的 RANGE 事件 (水位信息)。
-    更新: 兼容浮点数格式 ([\d\.]+)
+    更新: 兼容浮点数格式
     """
     data = []
 
