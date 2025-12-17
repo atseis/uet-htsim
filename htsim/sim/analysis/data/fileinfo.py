@@ -236,27 +236,50 @@ class ExperimentResult:
     @cached_property
     def _raw_sampling_df(self) -> pd.DataFrame:
         """
-        [内部方法] 加载所有 Sampling 类型 (Type 5) 的原始数据。
-        包含 Queue 和 Switch 的混合数据。
+        [修改] 加载 Range, Overflow, Traffic 事件并合并。
         """
         if not self.log_path.exists():
             return pd.DataFrame()
 
-        # 1. 解析原始数据
+        # 1. 解析所有类型的队列日志 (Range, Overflow, Traffic)
         df_range = queue.parse_sampling_events_from_file(self.log_path)
+        df_overflow = queue.parse_overflow_events_from_file(self.log_path)  # 新增
         df_traffic = queue.parse_traffic_events_from_file(self.log_path)
 
         if df_range.empty:
             return pd.DataFrame()
 
-        # 2. 合并 Range 和 Traffic
-        if not df_traffic.empty:
-            # 确保按 time, queue_id 合并 (注意: 这里 queue_id 实质是 object_id)
-            df = pd.merge(df_range, df_traffic, on=["time", "queue_id"], how="left")
+        # 2. 合并 Overflow 数据 (Left Join on time, queue_id)
+        if not df_overflow.empty:
+            df = pd.merge(df_range, df_overflow, on=["time", "queue_id"], how="left")
         else:
             df = df_range
-            df["cum_arr_us"] = 0.0
-            df["cum_drop_us"] = 0.0
+            # 填充默认值防止报错
+            for col in ["last_dropped_bytes", "last_idled_bytes", "queue_buf_bytes"]:
+                df[col] = 0.0
+
+        # 3. 合并 Traffic 数据
+        if not df_traffic.empty:
+            df = pd.merge(df, df_traffic, on=["time", "queue_id"], how="left")
+        else:
+            for col in ["cum_arr_us", "cum_idle_us", "cum_drop_us"]:
+                df[col] = 0.0
+
+        return df
+
+    def _compute_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        基于 DeepWiki Q&A 指导计算高阶队列指标。
+        严格遵循 htsim 的物理含义：
+        - cum_* 变量在 loggers.cpp 中是 'Service Time (Seconds)'
+        - queue.py 解析时转为了 'Microseconds (us)'
+        - time 是 'Seconds'
+        """
+        if df.empty:
+            return df
+
+        if self.idmap.data:
+            df["name"] = df["queue_id"].map(self.idmap.data)
 
         return df
 
@@ -307,49 +330,6 @@ class ExperimentResult:
 
         return df
 
-    def _compute_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        [内部通用] 计算 Utilization 和 Drop Ratio。
-        抽离出来供 queue_df 复用 (switch_df 视需求也可复用)
-        """
-        # 排序确保差分正确
-        df = df.sort_values(by=["queue_id", "time"])
-
-        # 计算时间窗口 dt
-        df["dt_us"] = df.groupby("queue_id")["time"].diff().fillna(0) * 1e6
-        df["d_arr"] = df.groupby("queue_id")["cum_arr_us"].diff().fillna(0)
-        df["d_drop"] = df.groupby("queue_id")["cum_drop_us"].diff().fillna(0)
-
-        mask = df["dt_us"] > 0.001
-
-        # Utilization
-        df.loc[mask, "utilization"] = (
-            df.loc[mask, "d_arr"] - df.loc[mask, "d_drop"]
-        ) / df.loc[mask, "dt_us"]
-
-        # Drop Ratio
-        valid_load = (df["d_arr"] > 0.001) & mask
-        df.loc[valid_load, "drop_ratio"] = (
-            df.loc[valid_load, "d_drop"] / df.loc[valid_load, "d_arr"]
-        )
-
-        # 清洗
-        df["utilization"] = df["utilization"].fillna(0).clip(0, 1.0)
-        df["drop_ratio"] = df["drop_ratio"].fillna(0).clip(0, 1.0)
-
-        # 注入元数据
-        if self.idmap.data:
-            df["name"] = df["queue_id"].map(self.idmap.data)
-
-            # Category 逻辑仅对 Queue 有效，Switch 不需要 LinkType 分类
-            # 可以在此处判断，或仅在 queue_df 中处理 category
-            if "category" not in df.columns:
-                # ... (原有 category 注入逻辑) ...
-                pass  # 为了代码简洁，这里略过，建议保留在 queue_df 专属逻辑中
-
-        # 清理中间列
-        return df.drop(columns=["dt_us", "d_arr", "d_drop"], errors="ignore")
-
     # ==========================
     # Modified: 智能清洗逻辑 (DRY Refactoring)
     # ==========================
@@ -362,7 +342,7 @@ class ExperimentResult:
         逻辑：
         1. 剔除全程 value_col (如 max_q 或 rx_total) 均为 0 的 ID。
         2. 裁剪掉最后一次活跃之后的时间段 (Tail Trimming)。
-        
+
         Args:
             df: 原始 DataFrame
             value_col: 用于判断活跃度的数值列名
@@ -370,7 +350,7 @@ class ExperimentResult:
         """
         if df.empty:
             return df
-        
+
         # 确保 id_col 存在
         if id_col not in df.columns:
             return df
@@ -388,9 +368,9 @@ class ExperimentResult:
         # 2. 尾部裁剪 (Tail Trimming)
         # 找出所有活跃时刻 (value > 0)
         active_events = df_active[df_active[value_col] > 0]
-        
+
         if active_events.empty:
-             return pd.DataFrame(columns=df.columns)
+            return pd.DataFrame(columns=df.columns)
 
         # 找出每个 ID 的“最后活跃时间”
         cutoff_times = active_events.groupby(id_col)["time"].max().reset_index()
@@ -411,7 +391,7 @@ class ExperimentResult:
     def active_nic_df(self) -> pd.DataFrame:
         """
         [智能清洗] 获取“有效”的 NIC 数据。
-        
+
         注意：nic_df 中的 nic_id 是 Source Node ID (模拟器内部 ID)，
         并非全局 LogID，因此不能关联 idmap 获取名称。
         """
@@ -421,7 +401,7 @@ class ExperimentResult:
 
         # 确定活跃指标列名 (自适应 rate_unit)
         target_col = f"rx_total_{self.rate_unit}"
-        
+
         # 调用通用清洗逻辑，指定 ID 列为 nic_id
         return self._clean_sampling_df(df, value_col=target_col, id_col="nic_id")
 

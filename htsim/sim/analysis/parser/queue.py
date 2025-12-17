@@ -269,3 +269,52 @@ def parse_traffic_events_from_file(file_path: Union[str, Path]) -> pd.DataFrame:
     """从日志文件中提取累积流量数据 (CUM_TRAFFIC)"""
     text = runner.get_queue_cum_traffic(str(file_path))
     return parse_traffic_events(text)
+
+
+def parse_overflow_events(text: str) -> pd.DataFrame:
+    """
+    [新增] 解析 QueueLoggerSampling 产生的 OVERFLOW 事件。
+    兼容 htsim 日志中可能的 Typo ("OVERLOW")。
+    """
+    data = []
+
+    # 匹配 ... Ev OVERFLOW LastIdled -100 LastDropped 0 QueueBuf 15000 ...
+    pattern = re.compile(
+        r"(\d+\.\d+)\s+"  # Time
+        r"Type\s+QUEUE_APPROX\s+"  # Type
+        r"ID\s+(\d+)\s+"  # ID
+        r"Ev\s+(?:OVERFLOW|OVERLOW)\s+"  # Event (Handle Typo)
+        r"LastIdled\s+([\d\.\-]+)\s+"  # LastIdled (Can be negative)
+        r"LastDropped\s+([\d\.]+)\s+"  # LastDropped
+        r"QueueBuf\s+([\d\.]+)"  # QueueBuf
+    )
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        match = pattern.search(line)
+        if match:
+            try:
+                data.append(
+                    {
+                        "time": float(match.group(1)),
+                        "queue_id": int(match.group(2)),
+                        "last_idled_bytes": float(match.group(3)),
+                        "last_dropped_bytes": float(match.group(4)),
+                        "queue_buf_bytes": float(match.group(5)),
+                    }
+                )
+            except ValueError:
+                continue
+
+    df = pd.DataFrame(data)
+    if not df.empty:
+        df["queue_id"] = df["queue_id"].astype(int)
+    return df
+
+
+def parse_overflow_events_from_file(file_path: Union[str, Path]) -> pd.DataFrame:
+    text = runner.run_parse(str(file_path), flags=["-ascii", "-filter", "OVERLOW"])
+    return parse_overflow_events(text)
