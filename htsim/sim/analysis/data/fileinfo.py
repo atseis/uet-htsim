@@ -231,16 +231,23 @@ class ExperimentResult:
 
     @cached_property
     def queue_df(self) -> pd.DataFrame:
-        """[Queue] 端口队列数据 (保留所有列 + 注入 Name)"""
+        """[Queue] 端口队列数据 (自动注入 Name + 计算高级指标)"""
         df = self._raw_sampling_df
         if df.empty:
             return df
+
         valid_ids = set(self.idmap.queueIDs)
         if not valid_ids:
             return df
 
+        # 1. 筛选队列 ID
         df_filtered = df[df["queue_id"].isin(valid_ids)].copy()
-        return self._inject_name(df_filtered, "queue_id")
+
+        # 2. [New] 计算高级流量指标 (Utilization, Load Factor, etc.)
+        df_metrics = self._compute_traffic_metrics(df_filtered)
+
+        # 3. 注入名称
+        return self._inject_name(df_metrics, "queue_id")
 
     @cached_property
     def switch_df(self) -> pd.DataFrame:
@@ -386,3 +393,72 @@ class ExperimentResult:
             return pd.DataFrame()
         return queue.parse_simple_events_from_file(self.log_path, queue_id=queue_id)
 
+    # ==========================
+    # Helper: Traffic Metrics Calculation
+    # ==========================
+    def _compute_traffic_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        [New] 基于累积量计算微分指标 (Windowed Metrics)。
+
+        修正点：
+        1. [Fix] 第一行数据不再丢失：NaN 差分填充为原始值 (Delta = Value - 0)。
+        2. [Fix] 利用率改为百分比显示 (0-100)。
+        3. [Fix] 增加噪声门限，清除 1e-16 这种极小值。
+        """
+        # 必须包含 Traffic 相关列才能计算
+        required_cols = ["cum_arr_us", "cum_idle_us", "cum_drop_us", "time", "queue_id"]
+        if df.empty or not all(col in df.columns for col in required_cols):
+            return df
+
+        # 避免修改原始缓存数据
+        df = df.copy()
+
+        # 按队列分组并按时间排序
+        df = df.sort_values(by=["queue_id", "time"])
+
+        # 定义需要做差分的列
+        diff_cols = ["time", "cum_arr_us", "cum_idle_us", "cum_drop_us"]
+
+        # 1. 计算微分 (Diff)
+        grouped = df.groupby("queue_id")[diff_cols]
+        diffs = grouped.diff()
+
+        # [Fix] 核心修复：处理第一行数据
+        # diff() 第一行是 NaN，我们假设初始状态为 0，所以第一行的 Delta = Current - 0
+        # 使用 fillna 将 NaN 替换为 df 原始列的值
+        for col in diff_cols:
+            diffs[col] = diffs[col].fillna(df[col])
+
+        # 2. 计算时间窗口 (转为微秒)
+        # diffs["time"] 是秒，乘以 1e6 转为 us
+        dt_us = diffs["time"] * 1e6
+        dt_us = dt_us.replace(0, np.nan)  # 防除零
+
+        # 3. 计算利用率 (Utilization %)
+        # 公式: 1.0 - (空闲时间 / 总时间)
+        d_idle = diffs["cum_idle_us"]
+        raw_util = 1.0 - (d_idle / dt_us)
+
+        # [Fix] 数据清洗：截断范围 + 噪声过滤
+        # 先 clip 到理论范围 [0, 1]
+        raw_util = raw_util.clip(0.0, 1.0)
+        # 过滤极小噪声 (e.g., 4.44e-16 -> 0.0)
+        raw_util = raw_util.where(raw_util > 1e-6, 0.0)
+        # 转为百分比
+        df["utilization"] = raw_util * 100.0
+
+        # 4. 计算到达强度 (Load Factor)
+        d_arr = diffs["cum_arr_us"]
+        df["load_factor"] = d_arr / dt_us
+
+        # 5. 计算丢弃比例 (Drop Ratio %)
+        d_drop = diffs["cum_drop_us"]
+        safe_arr = d_arr.replace(0, np.nan)
+        raw_drop = (d_drop / safe_arr).clip(0.0, 1.0)
+        df["drop_ratio"] = raw_drop * 100.0  # 也转为百分比更直观
+
+        # 6. 填充由除以零产生的 NaN (比如 load_factor)
+        fill_cols = ["utilization", "load_factor", "drop_ratio"]
+        df[fill_cols] = df[fill_cols].fillna(0.0)
+
+        return df
