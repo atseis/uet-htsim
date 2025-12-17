@@ -1,10 +1,23 @@
-import re, yaml
-from uuid import main
-from typing import Dict, List, Callable, Union
+import re
+import yaml
 from pathlib import Path
+from typing import Dict, List
 
 
-def parse_variables(status_path: Path):
+def get_command(status_path: Path) -> str:
+    """
+    读取 status.yaml，返回 command
+    """
+    if not status_path.is_file():
+        raise FileNotFoundError(f"status.yaml 文件不存在: {status_path}")
+
+    with status_path.open("r") as f:
+        status = yaml.safe_load(f)
+        command = status.get("command", "")
+    return command
+
+
+def parse_variables(status_path: Path) -> Dict:
     """
     读取 status.yaml，返回 {variable: value} 字典
     """
@@ -13,13 +26,53 @@ def parse_variables(status_path: Path):
 
     with status_path.open("r") as f:
         status = yaml.safe_load(f)
-        variables = status.get("variables", "")
+        variables = status.get(
+            "variables", []
+        )  # 修正: default should be list based on your usage logic
+
+    # 兼容处理: 如果 variables 为空字符串或 None，返回空字典
+    if not variables:
+        return {}
+
+    # 你的原有逻辑: variables 是 list of dicts
     variables = {k: v for d in variables for k, v in d.items()}
     return variables
 
 
-if __name__ == "__main__":
-    p = "/root/code/uet-htsim/htsim/sim/results/RICC_tests/config_baseline/uec_baseline_incastconns16/status.yaml"
-    vars = parse_variables(Path(p))
+# ==========================================
+# 新增功能: 解析 Logs
+# ==========================================
+def parse_enabled_logs(status_path: Path) -> List[str]:
+    """
+    从 status.yaml 的 command 中解析出开启了哪些 log。
+    例如: "... -log sink -log flow_events ..." -> ['sink', 'flow_events']
+    """
+    # 1. 获取原始命令字符串
+    cmd = get_command(status_path)
 
-    print(vars)
+    # 2. 使用正则查找所有匹配项
+    # \s+ 兼容可能有多个空格的情况
+    pattern = r"-log\s+(\S+)"
+    logs = re.findall(pattern, cmd)
+
+    return logs
+
+
+if __name__ == "__main__":
+    # 测试代码
+    # 假设这是你的 status.yaml 路径 (请确保文件存在或使用 mock 数据测试)
+    p = "/root/code/uet-htsim/htsim/sim/results/RICC_tests/diag_baseline_autopsy_seed4/debug_seed4_autopsy/status.yaml"
+    path_obj = Path(p)
+
+    try:
+        # 测试 Logs 解析
+        logs = parse_enabled_logs(path_obj)
+        print(f"Enabled Logs: {logs}")
+
+        # 测试原有功能
+        vars = parse_variables(path_obj)
+        print(f"Variables: {vars}")
+
+    except FileNotFoundError as e:
+        print(e)
+

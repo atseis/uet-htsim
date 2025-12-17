@@ -462,3 +462,15 @@ class ExperimentResult:
         df[fill_cols] = df[fill_cols].fillna(0.0)
 
         return df
+
+    @property
+    def report(self):
+        """
+        [Lazy Loading] 返回一个 AutoVisualizer 实例用于快速绘图。
+        仅在被调用时才会 import matplotlib 等库。
+        用法: res.report.show() 或 res.report.save("path")
+        """
+        # 局部 import，避免污染核心类的依赖
+        from ..viz.autoreport import AutoVisualizer
+
+        return AutoVisualizer(self)
