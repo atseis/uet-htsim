@@ -274,7 +274,7 @@ def parse_traffic_events_from_file(file_path: Union[str, Path]) -> pd.DataFrame:
 def parse_overflow_events(text: str) -> pd.DataFrame:
     """
     [新增] 解析 QueueLoggerSampling 产生的 OVERFLOW 事件。
-    兼容 htsim 日志中可能的 Typo ("OVERLOW")。
+    兼容 htsim 日志中可能的 Typo ("OVERFLOW")。
     """
     data = []
 
@@ -283,7 +283,7 @@ def parse_overflow_events(text: str) -> pd.DataFrame:
         r"(\d+\.\d+)\s+"  # Time
         r"Type\s+QUEUE_APPROX\s+"  # Type
         r"ID\s+(\d+)\s+"  # ID
-        r"Ev\s+(?:OVERFLOW|OVERLOW)\s+"  # Event (Handle Typo)
+        r"Ev\s+(?:OVERFLOW|OVERFLOW)\s+"  # Event (Handle Typo)
         r"LastIdled\s+([\d\.\-]+)\s+"  # LastIdled (Can be negative)
         r"LastDropped\s+([\d\.]+)\s+"  # LastDropped
         r"QueueBuf\s+([\d\.]+)"  # QueueBuf
@@ -316,5 +316,5 @@ def parse_overflow_events(text: str) -> pd.DataFrame:
 
 
 def parse_overflow_events_from_file(file_path: Union[str, Path]) -> pd.DataFrame:
-    text = runner.run_parse(str(file_path), flags=["-ascii", "-filter", "OVERLOW"])
+    text = runner.run_parse(str(file_path), flags=["-ascii", "-filter", "OVERFLOW"])
     return parse_overflow_events(text)

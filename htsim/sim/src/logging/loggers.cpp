@@ -290,7 +290,7 @@ string QueueLoggerSampling::event_to_str(RawLogEvent& event) {
                         ss << " Name " << event._name;
                     break;
                 case QUEUE_OVERFLOW:
-                    ss << " Ev OVERLOW LastIdled " << event._val1 << " LastDropped " << event._val2
+                    ss << " Ev OVERFLOW LastIdled " << event._val1 << " LastDropped " << event._val2
                        << " QueueBuf " << event._val3;
                     if (event._name != "")
                         ss << " Name " << event._name;
