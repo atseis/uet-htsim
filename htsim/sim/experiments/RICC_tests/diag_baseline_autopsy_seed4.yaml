@@ -26,6 +26,7 @@ common:
       - flow_events
       - tor_downqueue
       - nic
+      - traffic
     debug: " "
 
 experiments:

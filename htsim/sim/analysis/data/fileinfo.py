@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 
 # 假设 parser 模块结构如下
-from ..parser import idmap, statusyaml, flow, queue, sink, nic
+from ..parser import idmap, statusyaml, flow, queue, sink, nic, traffic
 
 
 class ExperimentResult:
@@ -108,6 +108,20 @@ class ExperimentResult:
         if not self.log_path.exists():
             return pd.DataFrame()
         return flow.parse_flow_events_from_file(self.log_path.as_posix())
+
+    @cached_property
+    def traffic_df(self) -> pd.DataFrame:
+        """[Traffic] 全量数据包事件轨迹 (自动注入 Location Name)"""
+        if not self.log_path.exists():
+            return pd.DataFrame()
+
+        # 解析原始数据
+        df = traffic.parse_traffic_events_from_file(self.log_path)
+        if df.empty:
+            return df
+
+        # 注入位置名称：将 location_id 映射为物理组件名
+        return self._inject_name(df, "location_id")
 
     @cached_property
     def nic_df(self) -> pd.DataFrame:
@@ -392,6 +406,35 @@ class ExperimentResult:
         if not self.log_path.exists():
             return pd.DataFrame()
         return queue.parse_simple_events_from_file(self.log_path, queue_id=queue_id)
+
+    # ==========================
+    # Traffic 衍生 Insight 指标
+    # ==========================
+
+    @property
+    def drop_events_df(self) -> pd.DataFrame:
+        """快速提取全网丢包事件"""
+        df = self.traffic_df
+        if df.empty:
+            return df
+        return df[df["event"] == "DROP"].reset_index(drop=True)
+
+    @property
+    def trim_events_df(self) -> pd.DataFrame:
+        """快速提取 UEC 特有的数据包裁剪(Trim)事件"""
+        df = self.traffic_df
+        if df.empty:
+            return df
+        return df[df["event"] == "TRIM"].reset_index(drop=True)
+
+    def get_packet_trace(self, flow_id: int, pkt_id: int) -> pd.DataFrame:
+        """获取特定数据包在网络中的完整生存轨迹"""
+        df = self.traffic_df
+        if df.empty:
+            return df
+        return df[(df["flow_id"] == flow_id) & (df["pkt_id"] == pkt_id)].sort_values(
+            "time"
+        )
 
     # ==========================
     # Helper: Traffic Metrics Calculation

@@ -251,13 +251,7 @@ class AutoVisualizer:
     # 核心：特征提取逻辑
     # ==========================================
     def _extract_flow_features(self, df, hue_col):
-        """
-        计算每个流的特征：FCT（掉速点）、波动率、尾部活跃度
-        """
         features = []
-        # 阈值：设定为该流最大速率的 5%，低于此值认为“传输基本结束”
-        threshold_ratio = 0.05
-        # 尾部定义：最后 10% 的模拟时间
         t_max = df["time"].max()
         tail_start = t_max * 0.9
 
@@ -266,28 +260,34 @@ class AutoVisualizer:
             rates = group[self.rate_col].values
             times = group["time"].values
             
-            # 1. FCT (掉速点): 最后一个速率 > max*0.05 的点
-            max_rate = rates.max()
-            significant_indices = np.where(rates > max_rate * threshold_ratio)[0]
-            fct_point = times[significant_indices[-1]] if len(significant_indices) > 0 else times[0]
+            # --- 修改部分开始 ---
+            # 1. 找到所有速率 > 0 的索引 (完全移除阈值)
+            nonzero_indices = np.where(rates > 0)[0]
             
-            # 2. Volatility (波动率): 标准差
+            if len(nonzero_indices) > 0:
+                first_idx = nonzero_indices[0]
+                last_idx = nonzero_indices[-1]
+                
+                # 计算活跃时间：最晚非零时刻 - 最早非零时刻
+                active_lifetime = times[last_idx] - times[first_idx]
+                # 记录结束时间点用于绘图标注位置
+                fct_point = times[last_idx]
+            else:
+                active_lifetime = 0
+                fct_point = times[0]
+            # --- 修改部分结束 ---
+            
             volatility = np.std(rates)
-            
-            # 3. Tail Activity: 尾部平均速率
             tail_avg = group[group["time"] >= tail_start][self.rate_col].mean()
             
             features.append({
                 hue_col: name,
+                "active_lifetime": active_lifetime, # 增：新增生命周期字段
                 "fct_point": fct_point,
                 "volatility": volatility,
-                "tail_avg": tail_avg,
-                "last_time": times[-1],
-                "last_rate": rates[-1]
+                "tail_avg": tail_avg
             })
-        
         return pd.DataFrame(features)
-
     # ==========================================
     # 核心：双视图绘图模板
     # ==========================================
@@ -331,15 +331,15 @@ class AutoVisualizer:
             ax_anomaly.plot(group["time"], group[self.rate_col], color='lightgrey', alpha=0.2, linewidth=0.5, zorder=1)
 
         # 2. 计算高亮目标
-        # FCT 最晚前 3
-        top_fct = feat_df.nlargest(3, "fct_point")[hue_col].tolist()
+        # 生命周期最晚前 3
+        top_active = feat_df.nlargest(3, "active_lifetime")[hue_col].tolist()
         # 波动率最大前 2
         top_vol = feat_df.nlargest(2, "volatility")[hue_col].tolist()
         # 尾部活跃最高前 2
         top_tail = feat_df.nlargest(2, "tail_avg")[hue_col].tolist()
 
         highlights = {
-            "Slowest (FCT)": (top_fct, "#d62728"), # 红
+            "Slowest (FCT)": (top_active, "#d62728"), # 红
             "Unstable (Vol)": (top_vol, "#ff7f0e"), # 橙
             "Survivor (Tail)": (top_tail, "#1f77b4") # 蓝
         }
@@ -395,7 +395,7 @@ class AutoVisualizer:
         custom_lines = [Line2D([0], [0], color="#d62728", lw=2),
                         Line2D([0], [0], color="#ff7f0e", lw=2),
                         Line2D([0], [0], color="#1f77b4", lw=2)]
-        ax_anomaly.legend(custom_lines, ['Latest FCT', 'Highest Volatility', 'High Tail Activity'], 
+        ax_anomaly.legend(custom_lines, ['Longest Active', 'Highest Volatility', 'High Tail Activity'], 
                           loc='upper right', fontsize=9)
 
         # 格式化
