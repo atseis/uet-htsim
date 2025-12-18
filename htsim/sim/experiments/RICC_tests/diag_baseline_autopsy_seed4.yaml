@@ -12,7 +12,7 @@ common:
 
   simulation:
     tiers: 3
-    linkspeed: 100000
+    linkspeed: 200000
     mtu: 4150
     hop_latency: 1
     switch_latency: 0

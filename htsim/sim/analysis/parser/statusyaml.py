@@ -58,6 +58,25 @@ def parse_enabled_logs(status_path: Path) -> List[str]:
     return logs
 
 
+def parse_command_params(status_path: Path) -> Dict:
+    """
+    [Robust Fix] 解析完整的命令行参数。
+    支持单值 (-linkspeed 100000) 和多值 (-pfc_thresholds 20 80) 参数。
+    """
+    cmd = get_command(status_path)
+
+    # 正则逻辑：
+    # -([a-zA-Z_0-9]+) : 匹配以 - 开头的参数名
+    # \s+ : 匹配参数名后的空格
+    # (.*?) : 非贪婪匹配后续内容
+    # (?=\s-|$): 直到遇到“空格+横杠”或“字符串末尾”为止（断言，不消费字符）
+    pattern = r"-([a-zA-Z_0-9]+)\s+(.*?)(?=\s-|$)"
+    matches = re.findall(pattern, cmd)
+
+    # 结果清洗：strip 掉可能存在的首尾空格
+    return {k: v.strip() for k, v in matches}
+
+
 if __name__ == "__main__":
     # 测试代码
     # 假设这是你的 status.yaml 路径 (请确保文件存在或使用 mock 数据测试)
@@ -69,10 +88,12 @@ if __name__ == "__main__":
         logs = parse_enabled_logs(path_obj)
         print(f"Enabled Logs: {logs}")
 
+        logs = parse_command_params(path_obj)
+        print(f"Enabled Logs: {logs}")
+
         # 测试原有功能
         vars = parse_variables(path_obj)
         print(f"Variables: {vars}")
 
     except FileNotFoundError as e:
         print(e)
-

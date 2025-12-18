@@ -7,6 +7,10 @@ import numpy as np
 
 # 假设 parser 模块结构如下
 from ..parser import idmap, statusyaml, flow, queue, sink, nic, traffic
+import pandas as pd
+
+# 设置 Pandas 全局显示格式：保留 9 位小数，强制不使用科学计数法
+pd.options.display.float_format = "{:.9f}".format
 
 
 class ExperimentResult:
@@ -80,6 +84,51 @@ class ExperimentResult:
     def get_status_vars(self, key: str, default=None):
         return self.status_vars.get(key, default)
 
+    @cached_property
+    def command_params(self) -> Dict:
+        """从模拟命令中提取的原始参数字典"""
+        return statusyaml.parse_command_params(self.status_path)
+
+    @cached_property
+    def params(self) -> Dict:
+        """
+        [Core Fix] 整合后的实验参数中心。
+        优先级：variables (波动的变量) > command (命令行参数)
+        """
+        # 1. 首先加载命令行中的所有默认参数
+        merged = self.command_params.copy()
+
+        # 2. 使用 variables 中的值进行覆盖（因为 variables 记录了该子实验的具体取值）
+        # 注意：需要将 status_vars 中的值转为字符串或保持一致，以便后续统一处理
+        merged.update({k: str(v) for k, v in self.status_vars.items()})
+
+        return merged
+
+    def get_param(self, key: str, default=None, type_func=float):
+        """安全地获取参数并转换类型"""
+        val = self.params.get(key)
+        if val is None:
+            return default
+        try:
+            return type_func(val)
+        except (ValueError, TypeError):
+            return default
+
+    def get_param_list(self, key: str, default=None, type_func=float) -> List:
+        """
+        [New] 专门用于处理多值参数 (如 pfc_thresholds 或 ecn)。
+        返回转换后的列表。
+        """
+        val = self.params.get(key)
+        if val is None:
+            return default if default else []
+
+        try:
+            # 将 "20 80" 拆分为 ["20", "80"] 并转换类型
+            return [type_func(x) for x in val.split()]
+        except (ValueError, TypeError):
+            return []
+
     # ==========================
     # Helper: Name Injection
     # ==========================
@@ -108,6 +157,31 @@ class ExperimentResult:
         if not self.log_path.exists():
             return pd.DataFrame()
         return flow.parse_flow_events_from_file(self.log_path.as_posix())
+
+    @cached_property
+    def flow_slowdown_df(self) -> pd.DataFrame:
+        df = self.flow_df.copy()
+        if df.empty:
+            return df
+
+        # [Fix] 使用新的 get_param 逻辑从 merged params 中提取
+        linkspeed_mbps = self.get_param("linkspeed", default=100000)
+        linkspeed_bps = linkspeed_mbps * 1e6
+
+        hop_latency_us = self.get_param("hop_latency", default=1.0)
+
+        # 获取拓扑层级 (tiers)，默认为 3
+        tiers = int(self.get_param("tiers", default=3))
+        # 根据层数计算传播跳数 (2层: Src->ToR->Agg->ToR->Dst=4跳; 3层: 6跳)
+        hops = 6 if tiers == 3 else 4
+
+        base_rtt_ns = (hop_latency_us * hops) * 1000
+
+        df["ideal_fct_ns"] = (df["size_bytes"] * 8 / linkspeed_bps) * 1e9 + base_rtt_ns
+        df["slowdown"] = df["fct_ns"] / df["ideal_fct_ns"]
+        df["slowdown"] = df["slowdown"].clip(lower=1.0)
+
+        return df
 
     @cached_property
     def traffic_df(self) -> pd.DataFrame:
@@ -412,6 +486,15 @@ class ExperimentResult:
     # ==========================
 
     @property
+    def trim_events_df(self) -> pd.DataFrame:
+        """[UEC Specific] 快速提取全网报文裁剪 (Trim) 事件"""
+        df = self.traffic_df
+        if df.empty:
+            return df
+        # UEC 协议中，Trim 会被 TrafficLoggerSimple 记录为 TRIM 事件
+        return df[df["event"] == "TRIM"].reset_index(drop=True)
+
+    @property
     def drop_events_df(self) -> pd.DataFrame:
         """快速提取全网丢包事件"""
         df = self.traffic_df
@@ -419,90 +502,50 @@ class ExperimentResult:
             return df
         return df[df["event"] == "DROP"].reset_index(drop=True)
 
-    @property
-    def trim_events_df(self) -> pd.DataFrame:
-        """快速提取 UEC 特有的数据包裁剪(Trim)事件"""
-        df = self.traffic_df
-        if df.empty:
-            return df
-        return df[df["event"] == "TRIM"].reset_index(drop=True)
-
-    def get_packet_trace(self, flow_id: int, pkt_id: int) -> pd.DataFrame:
-        """获取特定数据包在网络中的完整生存轨迹"""
-        df = self.traffic_df
-        if df.empty:
-            return df
-        return df[(df["flow_id"] == flow_id) & (df["pkt_id"] == pkt_id)].sort_values(
-            "time"
-        )
-
-    # ==========================
-    # Helper: Traffic Metrics Calculation
-    # ==========================
     def _compute_traffic_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        [New] 基于累积量计算微分指标 (Windowed Metrics)。
+        [Refined] 基于累积量计算采样窗口内的性能指标。
 
-        修正点：
-        1. [Fix] 第一行数据不再丢失：NaN 差分填充为原始值 (Delta = Value - 0)。
-        2. [Fix] 利用率改为百分比显示 (0-100)。
-        3. [Fix] 增加噪声门限，清除 1e-16 这种极小值。
+        计算公式:
+        1. Utilization % = 100 * (1 - Δcum_idle / Δtime)
+        2. Load Factor = Δcum_arr / Δtime
+        3. Drop Ratio % = 100 * (Δcum_drop / Δcum_arr)
         """
-        # 必须包含 Traffic 相关列才能计算
         required_cols = ["cum_arr_us", "cum_idle_us", "cum_drop_us", "time", "queue_id"]
         if df.empty or not all(col in df.columns for col in required_cols):
             return df
 
-        # 避免修改原始缓存数据
-        df = df.copy()
+        df = df.copy().sort_values(by=["queue_id", "time"])
 
-        # 按队列分组并按时间排序
-        df = df.sort_values(by=["queue_id", "time"])
-
-        # 定义需要做差分的列
+        # 针对每个队列独立差分
         diff_cols = ["time", "cum_arr_us", "cum_idle_us", "cum_drop_us"]
-
-        # 1. 计算微分 (Diff)
         grouped = df.groupby("queue_id")[diff_cols]
         diffs = grouped.diff()
 
-        # [Fix] 核心修复：处理第一行数据
-        # diff() 第一行是 NaN，我们假设初始状态为 0，所以第一行的 Delta = Current - 0
-        # 使用 fillna 将 NaN 替换为 df 原始列的值
+        # [Fix] 首行补偿：处理 diff() 产生的 NaN
+        # 假设 t=0 时累积量为 0，则第一行的 Delta = 当前值
         for col in diff_cols:
             diffs[col] = diffs[col].fillna(df[col])
 
-        # 2. 计算时间窗口 (转为微秒)
-        # diffs["time"] 是秒，乘以 1e6 转为 us
+        # 时间差转换为微秒 (dt_us)
         dt_us = diffs["time"] * 1e6
-        dt_us = dt_us.replace(0, np.nan)  # 防除零
+        dt_us = dt_us.replace(0, np.nan)  # 避免除零错误
 
-        # 3. 计算利用率 (Utilization %)
-        # 公式: 1.0 - (空闲时间 / 总时间)
-        d_idle = diffs["cum_idle_us"]
-        raw_util = 1.0 - (d_idle / dt_us)
+        # --- A. Utilization (%) ---
+        # 反映链路忙碌程度
+        raw_util = 1.0 - (diffs["cum_idle_us"] / dt_us)
+        # 噪声过滤与范围限制
+        df["utilization"] = raw_util.clip(0, 1).where(raw_util > 1e-6, 0) * 100.0
 
-        # [Fix] 数据清洗：截断范围 + 噪声过滤
-        # 先 clip 到理论范围 [0, 1]
-        raw_util = raw_util.clip(0.0, 1.0)
-        # 过滤极小噪声 (e.g., 4.44e-16 -> 0.0)
-        raw_util = raw_util.where(raw_util > 1e-6, 0.0)
-        # 转为百分比
-        df["utilization"] = raw_util * 100.0
+        # --- B. Load Factor ---
+        # 反映到达强度 (Demand)，可能 > 1.0
+        df["load_factor"] = diffs["cum_arr_us"] / dt_us
+        df["load_factor"] = df["load_factor"].where(df["load_factor"] > 1e-6, 0)
 
-        # 4. 计算到达强度 (Load Factor)
-        d_arr = diffs["cum_arr_us"]
-        df["load_factor"] = d_arr / dt_us
-
-        # 5. 计算丢弃比例 (Drop Ratio %)
-        d_drop = diffs["cum_drop_us"]
-        safe_arr = d_arr.replace(0, np.nan)
-        raw_drop = (d_drop / safe_arr).clip(0.0, 1.0)
-        df["drop_ratio"] = raw_drop * 100.0  # 也转为百分比更直观
-
-        # 6. 填充由除以零产生的 NaN (比如 load_factor)
-        fill_cols = ["utilization", "load_factor", "drop_ratio"]
-        df[fill_cols] = df[fill_cols].fillna(0.0)
+        # --- C. Drop Ratio (%) ---
+        # 反映因拥塞导致的工作量损失
+        d_arr = diffs["cum_arr_us"].replace(0, np.nan)
+        df["drop_ratio"] = (diffs["cum_drop_us"] / d_arr).clip(0, 1).fillna(0) * 100.0
 
         return df
 
