@@ -30,8 +30,8 @@ def parse_flow_events(text: str) -> pd.DataFrame:
     # 查找所有开始事件
     for match in re.finditer(start_pattern, text):
         time = float(match.group(1)) * 1e9  # 转换为纳秒
-        src_id = match.group(2)
-        flow_id = match.group(3)
+        src_id = int(match.group(2))
+        flow_id = int(match.group(3))
 
         flows[flow_id] = {
             "flow_id": flow_id,
@@ -46,8 +46,8 @@ def parse_flow_events(text: str) -> pd.DataFrame:
     # 查找所有结束事件
     for match in re.finditer(finish_pattern, text):
         time = float(match.group(1)) * 1e9  # 转换为纳秒
-        src_id = match.group(2)
-        flow_id = match.group(3)
+        src_id = int(match.group(2))
+        flow_id = int(match.group(3))
         size_bytes = int(match.group(4))
         packets = int(match.group(5))
 
@@ -94,4 +94,3 @@ def parse_flow_events_from_file(file_path: str) -> pd.DataFrame:
     """
     text = runner.get_flow_completion_times(file_path)
     return parse_flow_events(text)
-

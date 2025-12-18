@@ -12,14 +12,14 @@ common:
 
   simulation:
     tiers: 3
-    linkspeed: 200000
+    linkspeed: 100000
     mtu: 4150
     hop_latency: 1
     switch_latency: 0
     strat: ecmp_host
     load_balancing_algo: mixed
     paths: 64
-    logtime: 0.1
+    logtime: 0.001
     end: 2000
     log:
       - sink
