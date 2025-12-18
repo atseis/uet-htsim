@@ -247,20 +247,175 @@ class AutoVisualizer:
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
         
         return fig
+    # ==========================================
+    # 核心：特征提取逻辑
+    # ==========================================
+    def _extract_flow_features(self, df, hue_col):
+        """
+        计算每个流的特征：FCT（掉速点）、波动率、尾部活跃度
+        """
+        features = []
+        # 阈值：设定为该流最大速率的 5%，低于此值认为“传输基本结束”
+        threshold_ratio = 0.05
+        # 尾部定义：最后 10% 的模拟时间
+        t_max = df["time"].max()
+        tail_start = t_max * 0.9
 
+        for name, group in df.groupby(hue_col):
+            group = group.sort_values("time")
+            rates = group[self.rate_col].values
+            times = group["time"].values
+            
+            # 1. FCT (掉速点): 最后一个速率 > max*0.05 的点
+            max_rate = rates.max()
+            significant_indices = np.where(rates > max_rate * threshold_ratio)[0]
+            fct_point = times[significant_indices[-1]] if len(significant_indices) > 0 else times[0]
+            
+            # 2. Volatility (波动率): 标准差
+            volatility = np.std(rates)
+            
+            # 3. Tail Activity: 尾部平均速率
+            tail_avg = group[group["time"] >= tail_start][self.rate_col].mean()
+            
+            features.append({
+                hue_col: name,
+                "fct_point": fct_point,
+                "volatility": volatility,
+                "tail_avg": tail_avg,
+                "last_time": times[-1],
+                "last_rate": rates[-1]
+            })
+        
+        return pd.DataFrame(features)
+
+    # ==========================================
+    # 核心：双视图绘图模板
+    # ==========================================
+    def _plot_dual_view_goodput(self, df_attr: str, hue_col: str, title_prefix: str):
+        df = getattr(self.result, df_attr, pd.DataFrame())
+        if df.empty or self.rate_col not in df.columns:
+            return None
+
+        # 0. 预处理：提取特征
+        feat_df = self._extract_flow_features(df, hue_col)
+        
+        # 创建一个包含两个子图的画布
+        fig, (ax_dist, ax_anomaly) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+        plt.subplots_adjust(hspace=0.2)
+
+        # ------------------------------------------
+        # 视图 A: 整体趋势图 (Median + 10/90 Percentile)
+        # ------------------------------------------
+        # 透视表：行=时间, 列=流ID, 值=速率
+        pivot_df = df.pivot(index="time", columns=hue_col, values=self.rate_col).interpolate(method='linear')
+        pivot_df.index = pivot_df.index * 1e6 # 转为 us
+        
+        median_line = pivot_df.median(axis=1)
+        q10 = pivot_df.quantile(0.1, axis=1)
+        q90 = pivot_df.quantile(0.9, axis=1)
+
+        ax_dist.plot(pivot_df.index, median_line, color='black', linewidth=2, label='Median', zorder=5)
+        ax_dist.fill_between(pivot_df.index, q10, q90, color='gray', alpha=0.3, label='10th-90th Percentile')
+        
+        ax_dist.set_title(f"{title_prefix} - Macro Distribution", fontsize=14)
+        ax_dist.set_ylabel(f"Rate ({self.unit})")
+        ax_dist.grid(True, ls='--', alpha=0.5)
+        ax_dist.legend(loc='upper right')
+
+        # ------------------------------------------
+        # 视图 B: 异常凸显图 (Grey Background + Highlight)
+        # ------------------------------------------
+        # 1. 绘制背景：所有流
+        plot_df_us = self._to_us(df.copy())
+        for name, group in plot_df_us.groupby(hue_col):
+            ax_anomaly.plot(group["time"], group[self.rate_col], color='lightgrey', alpha=0.2, linewidth=0.5, zorder=1)
+
+        # 2. 计算高亮目标
+        # FCT 最晚前 3
+        top_fct = feat_df.nlargest(3, "fct_point")[hue_col].tolist()
+        # 波动率最大前 2
+        top_vol = feat_df.nlargest(2, "volatility")[hue_col].tolist()
+        # 尾部活跃最高前 2
+        top_tail = feat_df.nlargest(2, "tail_avg")[hue_col].tolist()
+
+        highlights = {
+            "Slowest (FCT)": (top_fct, "#d62728"), # 红
+            "Unstable (Vol)": (top_vol, "#ff7f0e"), # 橙
+            "Survivor (Tail)": (top_tail, "#1f77b4") # 蓝
+        }
+        label_groups = {}
+        plotted_ids = set()
+        x_limit_max = plot_df_us["time"].max()
+        for label, (ids, color) in highlights.items():
+            for target_id in ids:
+                if target_id in plotted_ids: continue 
+                plotted_ids.add(target_id)
+                
+                sub = plot_df_us[plot_df_us[hue_col] == target_id].sort_values("time")
+                ax_anomaly.plot(sub["time"], sub[self.rate_col], color=color, linewidth=1.5, zorder=10)
+                
+                last_x = x_limit_max 
+                last_y = round(sub[self.rate_col].iloc[-1], 2)
+                
+                # 依然按颜色聚合 ID，以便保持文字颜色一致
+                key = (last_y, color) 
+                if key not in label_groups:
+                    label_groups[key] = []
+                label_groups[key].append(str(target_id))
+        y_occupancy = {}
+        
+        # 为了美观，先处理 Y 值较大的标注
+        sorted_keys = sorted(label_groups.keys(), key=lambda k: k[0], reverse=True)
+
+        for y_val, color in sorted_keys:
+            ids = label_groups[(y_val, color)]
+            sorted_ids = sorted(ids, key=lambda x: int(x))
+            label_text = f" ID:{', '.join(sorted_ids)}"
+            
+            # 计算偏移：如果 y_val 相同，则每多一组，向下移动一行的距离
+            # 0.05 是 Rate 轴的单位偏移，根据你的 y 轴范围可微调
+            offset_step = (ax_anomaly.get_ylim()[1] - ax_anomaly.get_ylim()[0]) * 0.04
+            current_offset_count = y_occupancy.get(y_val, 0)
+            adjusted_y = y_val - (current_offset_count * offset_step)
+            
+            # 标记该 Y 坐标已被占用
+            y_occupancy[y_val] = current_offset_count + 1
+
+            ax_anomaly.text(x_limit_max, adjusted_y, label_text, color=color, 
+                           fontsize=9, fontweight='bold', va='center', 
+                           ha='left', clip_on=False)
+        ax_anomaly.set_title(f"{title_prefix} - Outliers & Anomalies", fontsize=14)
+        ax_anomaly.set_xlim(right=x_limit_max * 1.1)
+        ax_anomaly.set_xlabel("Time (us)")
+        ax_anomaly.set_ylabel(f"Rate ({self.unit})")
+        ax_anomaly.grid(True, ls='--', alpha=0.5)
+        
+        # 这种图不需要右侧 Legend，只需下方添加一个说明
+        from matplotlib.lines import Line2D
+        custom_lines = [Line2D([0], [0], color="#d62728", lw=2),
+                        Line2D([0], [0], color="#ff7f0e", lw=2),
+                        Line2D([0], [0], color="#1f77b4", lw=2)]
+        ax_anomaly.legend(custom_lines, ['Latest FCT', 'Highest Volatility', 'High Tail Activity'], 
+                          loc='upper right', fontsize=9)
+
+        # 格式化
+        for ax in [ax_dist, ax_anomaly]:
+            ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+            ax.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+
+        return fig
     def _plot_total_goodput(self):
         return self._plot_generic_goodput("total_goodput_df", hue=None, title="System Total Goodput")
 
     def _plot_src_goodput(self):
-        # nodeID 是 sink.py 聚合后的标准列名
-        return self._plot_generic_goodput("src_goodput_df", hue="nodeID", title="Goodput by Sender Host")
+        return self._plot_dual_view_goodput("src_goodput_df", "nodeID", "Sender Goodput")
 
     def _plot_sink_goodput(self):
-        return self._plot_generic_goodput("sink_goodput_df", hue="nodeID", title="Goodput by Receiver Host")
+        return self._plot_dual_view_goodput("sink_goodput_df", "nodeID", "Receiver Goodput")
 
     def _plot_flow_goodput(self):
-        # 在没有 FlowName 注入前，使用 ID 分类
-        return self._plot_generic_goodput("flow_goodput_df", hue="ID", title="Top Active Flows Goodput")
+        # 原始 ID 级别的 Goodput
+        return self._plot_dual_view_goodput("flow_goodput_df", "ID", "Flow Goodput")
 
     # ==========================================
     # 3. NIC Plotters
