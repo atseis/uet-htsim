@@ -223,46 +223,58 @@ class AutoVisualizer:
 
     def _plot_flow_fct_cdf(self):
         """
-        [Optimization] 合并 FCT 洞察.
-        展示实际 FCT 与 理想 FCT 的差距，Gap 越大说明拥塞导致的性能损失越高。
+        [Optimization] 增强型 FCT CDF.
+        去除了理想 FCT 对比，增加了 Median, P99, Max 的显式标注。
         """
-        df = self.result.flow_slowdown_df
-        if df.empty:
+        df = self.result.flow_df
+        if df.empty or "fct_ns" not in df.columns:
             return None
 
+        # FCT 单位转换: ns -> us
+        data = df["fct_ns"] / 1000.0
+
         fig, ax = plt.subplots(figsize=(8, 4))
-
-        # 1. 实际 FCT (us)
-        actual_data = df["fct_ns"] / 1000.0
-        sns.ecdfplot(
-            data=actual_data, ax=ax, linewidth=2, label="Actual FCT", color="#1f77b4"
-        )
-
-        # 2. 理想 FCT (us)
-        ideal_data = df["ideal_fct_ns"] / 1000.0
-        sns.ecdfplot(
-            data=ideal_data,
-            ax=ax,
-            linewidth=1.5,
-            label="Ideal (Zero-Congestion)",
-            color="#2ca02c",
-            linestyle="--",
-        )
-
+        # 绘制主曲线，使用经典的对数 X 轴
+        sns.ecdfplot(data=data, ax=ax, linewidth=2, color="#1f77b4")
         ax.set_xscale("log")
-        ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
-        ax.set_xlabel("Time (us)")
-        ax.set_ylabel("CDF")
-        ax.set_title(f"FCT CDF Analysis: Congestion Gap (n={len(df)})")
-        ax.grid(True, which="both", ls="--", alpha=0.3)
-        ax.legend()
 
-        # 标注 P99 实际延迟
-        p99 = np.percentile(actual_data, 99)
-        ax.axvline(p99, color="r", linestyle=":", alpha=0.6)
-        ax.text(
-            p99, 0.5, f" Actual P99: {p99:.0f} us", color="r", rotation=90, va="center"
-        )
+        # 1. 计算核心统计指标
+        metrics = {
+            "Median": data.median(),
+            "P99": np.percentile(data, 99),
+            "Max": data.max(),
+        }
+
+        # 2. 自动化标注逻辑 (避免标签重叠)
+        colors = {"Median": "black", "P99": "red", "Max": "brown"}
+        styles = {"Median": "--", "P99": ":", "Max": "-."}
+        y_offsets = {"Median": 0.2, "P99": 0.5, "Max": 0.8}
+
+        for label, val in metrics.items():
+            ax.axvline(
+                val, color=colors[label], linestyle=styles[label], alpha=0.7, lw=1.2
+            )
+            # 文本标注：旋转 90 度，背景白色填充以保证在网格线上清晰
+            ax.text(
+                val,
+                y_offsets[label],
+                f" {label}: {val:.1f} us",
+                color=colors[label],
+                rotation=90,
+                va="center",
+                backgroundcolor="white",
+                fontsize=9,
+                fontweight="bold",
+                zorder=10,
+            )
+
+        # 3. 格式化
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+        ax.xaxis.set_minor_formatter(ticker.FuncFormatter(self._fmt_plain))
+        ax.set_xlabel("Flow Completion Time (us)")
+        ax.set_ylabel("CDF")
+        ax.set_title(f"FCT Tail Latency Analysis (n={len(df)})")
+        ax.grid(True, which="both", ls="--", alpha=0.3)
 
         return fig
 

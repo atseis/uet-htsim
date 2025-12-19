@@ -19,7 +19,7 @@ common:
     strat: ecmp_host
     load_balancing_algo: mixed
     paths: 64
-    logtime: 0.001
+    logtime: 0.01
     end: 2000
     log:
       - sink
