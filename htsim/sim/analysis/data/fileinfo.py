@@ -32,6 +32,41 @@ class ExperimentResult:
         self.rate_unit = rate_unit
         self._validate_files()
 
+    def _compute_metric(self, name: str):
+        """
+        核心计算逻辑：区分“零值”与“不可观测”。
+        """
+        logs = self.enabled_logs
+
+        # 1. FCT 相关指标 (依赖 flow_events 日志)
+        if name in ["max_fct", "max_slowdown"]:
+            if "flow_events" not in logs:
+                return None  # 标记为不可观测，而非 0
+
+            if name == "max_fct":
+                return (
+                    float(self.flow_df["fct_ns"].max() / 1000.0)
+                    if not self.flow_df.empty
+                    else 0
+                )
+            if name == "max_slowdown":
+                return (
+                    float(self.flow_slowdown_df["slowdown"].max())
+                    if not self.flow_slowdown_df.empty
+                    else 0
+                )
+
+        # 2. RTO 相关指标 (依赖 traffic 日志)
+        if name == "rto_count":
+            if "traffic" not in logs:
+                return None  # 重要：未开日志时返回 None，表示数据缺失
+
+            if not self.traffic_df.empty:
+                return int(len(self.traffic_df[self.traffic_df["event"] == "RTO"]))
+            return 0  # 开了日志但没搜到 RTO，这才是真正的 0
+
+        raise ValueError(f"Unknown metric: {name}")
+
     def _resolve_base_dir(self, path: Union[str, Path]) -> Path:
         p = Path(path)
         if p.is_dir():
@@ -553,6 +588,75 @@ class ExperimentResult:
         df["drop_ratio"] = (diffs["cum_drop_us"] / d_arr).clip(0, 1).fillna(0) * 100.0
 
         return df
+
+    @cached_property
+    def status_data(self) -> Dict:
+        """[New] 完整加载 status.yaml 字典，避免多次磁盘读取"""
+        if not self.status_path.exists():
+            return {}
+        import yaml
+
+        try:
+            with open(self.status_path, "r") as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            return {}
+
+    @property
+    def is_success(self) -> bool:
+        """[New] 供 BatchResult 调用，判断该子实验是否成功完成"""
+        # 从 status.yaml 的顶级 key 中读取 status
+        return self.status_data.get("status") == "success"
+
+    @cached_property
+    def enabled_logs(self) -> set:
+        """
+        [New] 识别当前实验开启了哪些日志。
+        利用已有的 statusyaml 解析器。
+        """
+        from ..parser.statusyaml import parse_enabled_logs
+
+        if not self.status_path.exists():
+            return set()
+        return set(parse_enabled_logs(self.status_path))
+
+    def get_cached_metric(self, metric_name: str, force_recompute: bool = False):
+        """
+        [Lazy-Save] 获取指标。如果 summary.json 有效则直接读取，否则计算并存入。
+        """
+        summary_path = self.base_dir / "summary.json"
+
+        # 1. 直接使用缓存的 status_data 获取锚点 (start_time)
+        current_anchor = self.status_data.get("start_time")  #
+
+        # 2. 检查缓存是否可用 (逻辑同你之前的代码)
+        summary_data = {}
+        if summary_path.exists() and not force_recompute:
+            try:
+                import json
+
+                with open(summary_path, "r") as f:
+                    summary_data = json.load(f)
+                if (
+                    summary_data.get("anchor") == current_anchor
+                    and metric_name in summary_data
+                ):
+                    return summary_data[metric_name]
+            except Exception:
+                pass
+
+        # 3. 缓存失效：计算指标 (按需触发 flow_df/traffic_df 解析)
+        value = self._compute_metric(metric_name)
+
+        # 4. 回写缓存 (Lazy-Save)
+        summary_data["anchor"] = current_anchor
+        summary_data[metric_name] = value
+        import json
+
+        with open(summary_path, "w") as f:
+            json.dump(summary_data, f, indent=4)
+
+        return value
 
     @property
     def report(self):
