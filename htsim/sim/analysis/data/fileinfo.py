@@ -5,9 +5,7 @@ from functools import cached_property
 import pandas as pd
 import numpy as np
 
-# 假设 parser 模块结构如下
-from ..parser import idmap, statusyaml, flow, queue, sink, nic, traffic
-import pandas as pd
+from ..parser import idmap, statusyaml, flow, queue, sink, nic, traffic, cwnd
 
 # 设置 Pandas 全局显示格式：保留 9 位小数，强制不使用科学计数法
 pd.options.display.float_format = "{:.9f}".format
@@ -151,6 +149,13 @@ class ExperimentResult:
     # ==========================
     # 2. 核心数据: Flow & NIC
     # ==========================
+
+    @cached_property
+    def cwnd_df(self) -> pd.DataFrame:
+        """从 stdout.log 提取 cwnd 演变轨迹"""
+        if not self.stdout_path.exists():
+            return pd.DataFrame()
+        return cwnd.parse_cwnd_from_file(self.stdout_path)
 
     @cached_property
     def flow_df(self) -> pd.DataFrame:
@@ -470,7 +475,7 @@ class ExperimentResult:
             return None
         return None
 
-    def get_flowid_by_logid(self, log_id) -> Optional[int]:
+    def get_flowid_by_logID(self, log_id) -> Optional[int]:
         name = self.get_name_by_LogID(log_id)
         if name:
             return self.get_flowid_by_name(name)

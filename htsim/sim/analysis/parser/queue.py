@@ -283,7 +283,7 @@ def parse_overflow_events(text: str) -> pd.DataFrame:
         r"(\d+\.\d+)\s+"  # Time
         r"Type\s+QUEUE_APPROX\s+"  # Type
         r"ID\s+(\d+)\s+"  # ID
-        r"Ev\s+(?:OVERFLOW|OVERFLOW)\s+"  # Event (Handle Typo)
+        r"Ev\s+OVERFLOW\s+"  # Event (Handle Typo)
         r"LastIdled\s+([\d\.\-]+)\s+"  # LastIdled (Can be negative)
         r"LastDropped\s+([\d\.]+)\s+"  # LastDropped
         r"QueueBuf\s+([\d\.]+)"  # QueueBuf

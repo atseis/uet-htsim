@@ -33,37 +33,76 @@ class AutoVisualizer:
         self.result = result
         self.enabled_logs = set(parse_enabled_logs(self.result.status_path))
 
-        # 获取速率单位后缀 (e.g., "Gbps")，默认为 Gbps
         self.unit = getattr(self.result, "rate_unit", "Gbps")
-        # 预期的列名，例如 "Rate_Gbps"
         self.rate_col = f"Rate_{self.unit}"
 
-        # 注册所有绘图器
+        # 1. 注册所有基础绘图器 (保持原有 Key 不变)
         self.plotters = {
-            # --- Flow Level ---
             "Flow Completion Time (CDF)": self._plot_flow_fct_cdf,
             "Flow Size vs FCT (Scatter)": self._plot_flow_scatter,
-            # --- Goodput Level (Simplified) ---
+            "Flow Slowdown CDF": self._plot_flow_slowdown_cdf,
             "System Total Goodput": self._plot_total_goodput,
             "Goodput by Sender Host": self._plot_src_goodput,
             "Goodput by Receiver Host": self._plot_sink_goodput,
             "Top Active Flows Goodput": self._plot_flow_goodput,
-            # --- NIC Level ---
             "NIC Traffic Breakdown": self._plot_nic_stack,
-            # --- Queue Level ---
             "Last-Hop Queue Dynamics": self._plot_lasthop_queues,
             "Switch Shared Buffer Usage": self._plot_switch_buffer,
+            "Traffic Event Spatial Distribution (Heatmap)": self._plot_traffic_spatial_dist,
             "Bottleneck Correlation Analysis": self._plot_bottleneck_correlation,
+            "Incast Fan-in vs. Pressure": self._plot_incast_fanin_pressure,
+            "Protocol Efficiency (Payload vs Control)": self._plot_protocol_efficiency,
+            "Flow Path Spatio-Temporal Heatmap": self._plot_flow_path_heatmap_auto,
+            "Congestion Control Diagnostic": self._plot_cc_diagnostic_auto,
         }
-        self.plotters.update(
+
+        # 2. 定义漏斗式阅读逻辑 (REPORT_PLAN)
+        self.REPORT_PLAN = [
             {
-                "Flow Slowdown CDF": self._plot_flow_slowdown_cdf,
-                "Traffic Event Spatial Distribution (Heatmap)": self._plot_traffic_spatial_dist,
-                "Incast Fan-in vs. Pressure": self._plot_incast_fanin_pressure,
-                "Protocol Efficiency (Payload vs Control)": self._plot_protocol_efficiency,
-                "Flow Path Spatio-Temporal Heatmap": self._plot_flow_path_heatmap_auto,
-            }
-        )
+                "title": "Phase 1: 宏观指标 (The Result)",
+                "question": "性能是否达标？是否有严重的长尾（Tail Latency）？",
+                "items": [
+                    "Flow Completion Time (CDF)",
+                    "Flow Slowdown CDF",
+                    "Flow Size vs FCT (Scatter)",
+                ],
+            },
+            {
+                "title": "Phase 2: 吞吐分布 (The Stability)",
+                "question": "流量是否稳定？哪些流（High Volatility）在剧烈震荡？",
+                "items": [
+                    "System Total Goodput",
+                    "Goodput by Sender Host",
+                    "Goodput by Receiver Host",
+                    "Top Active Flows Goodput",
+                    "NIC Traffic Breakdown",
+                ],
+            },
+            {
+                "title": "Phase 3: 瓶颈定位 (The Hotspot)",
+                "question": "拥塞发生在网络的哪个位置（ToR, Agg, 或 Core）？丢包（Drop）与裁剪（Trim）的比例如何？",
+                "items": [
+                    "Traffic Event Spatial Distribution (Heatmap)",
+                    "Last-Hop Queue Dynamics",
+                ],
+            },
+            {
+                "title": "Phase 4: 因果关联 (The Causality)",
+                "question": "观察 cwnd 的下降是否是对队列上升的即时响应？队列排空后 cwnd 是否恢复太慢？",
+                "items": [
+                    "Congestion Control Diagnostic",
+                    "Incast Fan-in vs. Pressure",
+                    "Bottleneck Correlation Analysis",
+                    "Switch Shared Buffer Usage",
+                    "Protocol Efficiency (Payload vs Control)",
+                ],
+            },
+            {
+                "title": "Phase 5: 微观轨迹 (The Anatomy)",
+                "question": "对于那个最慢的流，它在每一跳的具体遭遇是什么？",
+                "items": ["Flow Path Spatio-Temporal Heatmap"],
+            },
+        ]
 
     def _get_active_plotters(self):
         """根据日志开启情况，筛选出需要执行的绘图函数"""
@@ -74,10 +113,10 @@ class AutoVisualizer:
             active["Flow Completion Time (CDF)"] = self.plotters[
                 "Flow Completion Time (CDF)"
             ]
-            active["Flow Size vs FCT (Scatter)"] = self.plotters[
-                "Flow Size vs FCT (Scatter)"
-            ]
-            active["Flow Slowdown CDF"] = self.plotters["Flow Slowdown CDF"]
+            # active["Flow Size vs FCT (Scatter)"] = self.plotters[
+            #     "Flow Size vs FCT (Scatter)"
+            # ]
+            # active["Flow Slowdown CDF"] = self.plotters["Flow Slowdown CDF"]
 
         # 2. Sink Logs (Goodput)
         if "sink" in self.enabled_logs:
@@ -96,8 +135,8 @@ class AutoVisualizer:
 
         # 4. Queue Logs
         queue_flags = {"tor_downqueue", "tor_upqueue", "queue"}
-        if not self.enabled_logs.isdisjoint(queue_flags):
-            active["Last-Hop Queue Dynamics"] = self.plotters["Last-Hop Queue Dynamics"]
+        # if not self.enabled_logs.isdisjoint(queue_flags):
+        #     active["Last-Hop Queue Dynamics"] = self.plotters["Last-Hop Queue Dynamics"]
 
         # 5. Switch Logs
         if "switch" in self.enabled_logs:
@@ -129,6 +168,15 @@ class AutoVisualizer:
             active["Flow Path Spatio-Temporal Heatmap"] = self.plotters[
                 "Flow Path Spatio-Temporal Heatmap"
             ]
+        # --- 新增: 基于 -debug 参数或数据存在性激活 ---
+        # 逻辑：如果命令行包含 -debug，或者 cwnd_df 确实解析到了数据，则激活
+        is_debug_enabled = self.result.params.get("debug") is not None
+        has_cwnd_data = not self.result.cwnd_df.empty
+
+        if (is_debug_enabled or has_cwnd_data) and "flow_events" in self.enabled_logs:
+            active["Congestion Control Diagnostic"] = self.plotters[
+                "Congestion Control Diagnostic"
+            ]
         return active
 
     # ==========================================
@@ -136,55 +184,81 @@ class AutoVisualizer:
     # ==========================================
 
     def show(self):
-        """[Interactive Mode] Jupyter Notebook 展示"""
+        """[Interactive Mode] 漏斗式逻辑引导报告"""
         if not IPYTHON_AVAILABLE:
             print("Error: IPython is not available.")
             return
 
         active_plotters = self._get_active_plotters()
-        if not active_plotters:
-            display(
-                Markdown("### ⚠️ No visualization data available (Check enabled logs)")
-            )
-            return
+        display(Markdown(f"# 🔍 实验全景观测报告: {self.result.base_dir.name}"))
 
-        display(Markdown(f"# 📊 Auto Report: {self.result.base_dir.name}"))
+        # 按计划顺序展示
+        for stage in self.REPORT_PLAN:
+            stage_active_items = [
+                item for item in stage["items"] if item in active_plotters
+            ]
+            if not stage_active_items:
+                continue
 
-        for title, plotter_func in active_plotters.items():
-            try:
-                fig = plotter_func()
-                if fig:
-                    display(Markdown(f"### {title}"))
-                    display(fig)
-                    plt.close(fig)
-            except Exception as e:
-                display(Markdown(f"**Error plotting {title}:** {str(e)}"))
+            display(Markdown(f"---"))
+            display(Markdown(f"## {stage['title']}"))
+            display(Markdown(f"> **思考重点**：{stage['question']}"))
+
+            for title in stage_active_items:
+                try:
+                    fig = self.plotters[title]()
+                    if fig:
+                        display(Markdown(f"### {title}"))
+                        display(fig)
+                        plt.close(fig)
+                except Exception as e:
+                    display(Markdown(f"**Error plotting {title}:** {str(e)}"))
 
     def save(self, output_dir: Union[str, Path]):
-        """[Batch Mode] 保存图片到磁盘"""
+        """[Batch Mode] 结构化保存图片并生成导读索引"""
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         active_plotters = self._get_active_plotters()
-        print(f"Generating report for {self.result.base_dir.name}...")
+        readme_content = [f"# 导读报告: {self.result.base_dir.name}\n"]
 
-        for title, plotter_func in active_plotters.items():
-            try:
-                fig = plotter_func()
-                if fig:
-                    safe_name = (
-                        title.replace(" ", "_")
-                        .replace("(", "")
-                        .replace(")", "")
-                        .lower()
-                        + ".png"
-                    )
-                    save_path = output_dir / safe_name
-                    fig.savefig(save_path, dpi=100, bbox_inches="tight")
-                    print(f"  [Saved] {safe_name}")
-                    plt.close(fig)
-            except Exception as e:
-                print(f"  [Error] Failed to plot {title}: {e}")
+        print(f"Generating structured report for {self.result.base_dir.name}...")
+
+        stage_idx = 1
+        for stage in self.REPORT_PLAN:
+            stage_items = [item for item in stage["items"] if item in active_plotters]
+            if not stage_items:
+                continue
+
+            readme_content.append(f"## {stage['title']}")
+            readme_content.append(f"**核心问题**：{stage['question']}\n")
+
+            for sub_idx, title in enumerate(stage_items, 1):
+                try:
+                    fig = self.plotters[title]()
+                    if fig:
+                        # 文件名示例：01-1_flow_completion_time_cdf.png
+                        safe_title = (
+                            title.lower()
+                            .replace(" ", "_")
+                            .replace("(", "")
+                            .replace(")", "")
+                        )
+                        filename = f"{stage_idx:02d}-{sub_idx}_{safe_title}.png"
+
+                        fig.savefig(output_dir / filename, dpi=120, bbox_inches="tight")
+                        readme_content.append(f"- ![{title}]({filename})")
+                        plt.close(fig)
+                        print(f"  [Saved] {filename}")
+                except Exception as e:
+                    print(f"  [Error] {title}: {e}")
+
+            readme_content.append("\n")
+            stage_idx += 1
+
+        # 保存 README 引导文件，方便离线查看
+        (output_dir / "README.md").write_text("\n".join(readme_content))
+        print(f"✅ Report indexed and saved to {output_dir}/")
 
     # ==========================================
     # 辅助格式化工具 (Helpers)
@@ -620,6 +694,183 @@ class AutoVisualizer:
     # ==========================================
     # 3. NIC Plotters
     # ==========================================
+
+    def _plot_cc_diagnostic(self, target_flow_name: str):
+        """
+        [Final Robust Version] 深度诊断视图：CWND + 瓶颈队列 + TRIM/DROP 事件。
+        """
+        res = self.result
+
+        # 1. 获取 CWND 数据 (来自 stdout.log)
+        cwnd_data = res.cwnd_df[res.cwnd_df["flow_name"] == target_flow_name].copy()
+        if cwnd_data.empty:
+            return None
+
+        # 2. 身份动态探测 (LoggedID 匹配)
+        # 逻辑：在 idmap 中寻找与流名匹配且在 traffic_df 中有实际记录的 ID
+        candidate_ids = [k for k, v in res.idmap.items() if target_flow_name in v]
+        active_traffic_ids = set(res.traffic_df["flow_id"].unique())
+
+        traffic_logged_id = next(
+            (cid for cid in candidate_ids if cid in active_traffic_ids), None
+        )
+
+        # 3. 提取数据
+        traffic_data = (
+            res.traffic_df[res.traffic_df["flow_id"] == traffic_logged_id].copy()
+            if traffic_logged_id
+            else pd.DataFrame()
+        )
+
+        # 4. 自动定位瓶颈 (该流丢包最多的位置)
+        hotspot_name = None
+        if not traffic_data.empty:
+            err_df = traffic_data[traffic_data["event"].isin(["DROP", "TRIM"])]
+            hotspot_name = (
+                err_df["name"].value_counts().idxmax()
+                if not err_df.empty
+                else traffic_data["name"].value_counts().idxmax()
+            )
+
+        # 5. 渲染
+        fig, ax1 = plt.subplots(figsize=(14, 6))
+        ax2 = ax1.twinx()
+
+        # 单位转换
+        cwnd_data["time_us"] = cwnd_data["time"] * 1e6
+        ax1.step(
+            cwnd_data["time_us"],
+            cwnd_data["cwnd"],
+            label="CWND",
+            color="#1f77b4",
+            where="post",
+        )
+        ax1.fill_between(
+            cwnd_data["time_us"],
+            0,
+            cwnd_data["in_flight"],
+            alpha=0.1,
+            color="#1f77b4",
+            step="post",
+            label="In-Flight",
+        )
+
+        if hotspot_name:
+            q_data = self._to_us(
+                res.active_queue_df[res.active_queue_df["name"] == hotspot_name]
+            )
+            ax2.plot(
+                q_data["time"],
+                q_data["max_q"],
+                label=f"Queue @ {hotspot_name}",
+                color="#d62728",
+                alpha=0.4,
+                ls=":",
+            )
+
+            t_plot = self._to_us(traffic_data)
+            for _, row in t_plot[t_plot["event"].isin(["DROP", "TRIM"])].iterrows():
+                ax1.axvline(
+                    row["time"],
+                    color="#ff7f0e" if row["event"] == "TRIM" else "#d62728",
+                    alpha=0.3,
+                    ls="--",
+                )
+
+        ax1.set_title(
+            f"CC Diagnostic: {target_flow_name} (LoggedID: {traffic_logged_id})"
+        )
+        ax1.set_xlabel("Time (us)")
+        ax1.set_ylabel("Bytes (CWND)")
+        ax2.set_ylabel("Queue Depth (Bytes)")
+        ax1.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+        ax2.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_bytes))
+        ax1.legend(loc="upper right")
+
+        return fig
+
+    def _plot_cc_diagnostic_auto(self):
+        """
+        [Corrected] 自动选择受害流。
+        逻辑：通过 IdMap 桥接 Logged ID 和逻辑名称，并优先选择 Slowdown 最大的流。
+        """
+        res = self.result
+        sd_df = res.flow_slowdown_df
+        target_name = None
+
+        if not sd_df.empty and not res.cwnd_df.empty:
+            # 1. 按 Slowdown 降序排列 (从最惨的流开始试)
+            sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
+
+            # 2. 依次检查受害流是否在 stdout.log (cwnd_df) 中有记录
+            # 因为可能只有部分流开启了 -debug_flowid
+            for _, row in sorted_worst.iterrows():
+                log_id = row["flow_id"]  # 这里的 ID 是 Logged ID (如 9098)
+                name = res.idmap.get(log_id)  # 翻译为 "Uec_304_0"
+
+                if name and name in res.cwnd_df["flow_name"].values:
+                    target_name = name
+                    print(
+                        f"ℹ️ 自动诊断锁定最高 Slowdown 流: {target_name} (ID: {log_id})"
+                    )
+                    break
+
+        # 3. 兜底：如果最惨的流没开 debug，找 cwnd_df 里有的第一个流
+        if target_name is None and not res.cwnd_df.empty:
+            target_name = res.cwnd_df["flow_name"].unique()[0]
+            print(f"ℹ️ 兜底方案：选择日志中存在的流: {target_name}")
+
+        if target_name:
+            return self._plot_cc_diagnostic(target_name)
+        return None
+
+    def _plot_cwnd_dynamics(self, target_flow_name: str = None):
+        """
+        绘制指定流的 cwnd 和 in_flight 曲线。
+        如果未指定，默认选择 FCT Slowdown 最大的流。
+        """
+        df = self.result.cwnd_df
+        if df.empty:
+            return None
+
+        # 自动选择目标流
+        if target_flow_name is None:
+            target_flow_name = df["flow_name"].unique()[0]
+
+        plot_df = df[df["flow_name"] == target_flow_name].copy()
+        plot_df = self._to_us(plot_df)  # s -> us
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+
+        ax.step(
+            plot_df["time"],
+            plot_df["cwnd"],
+            label="CWND (Limit)",
+            color="#1f77b4",
+            where="post",
+        )
+        ax.fill_between(
+            plot_df["time"],
+            0,
+            plot_df["in_flight"],
+            step="post",
+            alpha=0.2,
+            color="#2ca02c",
+            label="In-Flight Bytes",
+        )
+
+        ax.set_title(f"Congestion Window Dynamics: {target_flow_name}")
+        ax.set_xlabel("Time (us)")
+        ax.set_ylabel("Bytes")
+
+        # 使用你已有的格式化器
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_bytes))
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+
+        ax.legend(loc="upper right")
+        ax.grid(True, ls="--", alpha=0.3)
+
+        return fig
 
     def _plot_nic_stack(self):
         df = self.result.active_nic_df
