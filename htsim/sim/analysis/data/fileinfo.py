@@ -698,3 +698,78 @@ class ExperimentResult:
         from ..viz.autoreport import AutoVisualizer
 
         return AutoVisualizer(self)
+
+    def _get_identity_string(self) -> str:
+        """
+        从 status.yaml 的 variables 字段生成身份标识字符串。
+        例如: [{'randseed': 46}, {'paths': 64}] -> 'randseed46_paths64'
+        """
+        variables = self.status_data.get("variables", [])
+        parts = []
+        for var_dict in variables:
+            for k, v in var_dict.items():
+                parts.append(f"{k}{v}")
+        return "_".join(parts) if parts else "default"
+
+    def export_config(self) -> str:
+        """
+        [New] 在原始 YAML 同路径下生成诊断用 YAML。
+        格式: D_<原始yaml名称>_<身份标识>.yaml
+        """
+        import yaml
+
+        data = self.status_data
+        source_yaml_str = data.get("source_yaml")
+        if not source_yaml_str:
+            raise ValueError(f"status.yaml 中未记录 source_yaml，无法定位原始路径。")
+
+        source_path = Path(source_yaml_str)
+        all_params = data.get("all_params", {})
+
+        # 1. 生成身份标识与文件名
+        identity = self._get_identity_string()
+        new_filename = f"D_{source_path.stem}_{identity}.yaml"
+        target_path = source_path.parent / new_filename
+
+        # 2. 区分 Traffic 与 Simulation 参数 (逻辑复用 experiment.py)
+        traffic_keys = {
+            "type",
+            "nodes",
+            "conns",
+            "flows",
+            "groupsize",
+            "flowsize",
+            "extrastarttime",
+            "parallel",
+            "locality",
+            "groups",
+            "randseed",
+            "conns_incast",
+            "conns_outcast",
+            "prefer_remote",
+        }
+
+        traffic_params = {k: v for k, v in all_params.items() if k in traffic_keys}
+        sim_params = {k: v for k, v in all_params.items() if k not in traffic_keys}
+
+        # 移除自动生成的运行期冗余参数
+        sim_params.pop("o", None)
+        sim_params.pop("tm", None)
+
+        # 提取可执行程序名
+        original_cmd = data.get("command", "")
+        exe = original_cmd.split()[0] if original_cmd else "htsim_uec"
+
+        # 3. 构造 YAML 结构
+        repro_config = {
+            "common": {"execute": True, "simulation": sim_params},
+            "experiments": [
+                {"name": f"diag_{identity}", "exe": exe, "traffic": traffic_params}
+            ],
+        }
+
+        # 4. 写入文件
+        with open(target_path, "w", encoding="utf-8") as f:
+            yaml.dump(repro_config, f, sort_keys=False, indent=2)
+
+        return str(target_path.resolve())

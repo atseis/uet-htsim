@@ -365,6 +365,7 @@ def run_experiment(
                     label,
                     variables=task_variables,
                     all_params=full_params_dict,
+                    source_yaml=str(config_file_path_obj),
                 )
 
                 if task["execute"]:

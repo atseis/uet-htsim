@@ -38,11 +38,13 @@ def initialize_status(
     experiment_id: str,
     variables: Optional[List[Dict[str, Any]]] = None,
     all_params: Optional[Dict[str, Any]] = None,
+    source_yaml: Optional[str] = None,
 ) -> Dict[str, Any]:
     """初始化 status.yaml，新增 all_params 存储全量配置"""
     status_data = {
         "id": experiment_id,
         "command": command,
+        "source_yaml": source_yaml,
         "start_time": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "end_time": None,
         "duration_sec": None,
@@ -109,4 +111,3 @@ def should_run(status_file_path: Path, force_rerun: bool) -> bool:
         return False
 
     return True  # pending or failed
-
