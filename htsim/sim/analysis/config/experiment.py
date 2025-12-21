@@ -356,8 +356,15 @@ def run_experiment(
                         if value is not None:
                             task_variables.append({key: value})
 
+                # 构造全量参数字典
+                full_params_dict = {**common_flat, **task["t_var"], **task["s_var"]}
+
                 status.initialize_status(
-                    task["status_file"], full_command, label, variables=task_variables
+                    task["status_file"],
+                    full_command,
+                    label,
+                    variables=task_variables,
+                    all_params=full_params_dict,
                 )
 
                 if task["execute"]:

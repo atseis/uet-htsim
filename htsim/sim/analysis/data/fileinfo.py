@@ -39,17 +39,24 @@ class ExperimentResult:
         logs = self.enabled_logs
 
         # 1. FCT 相关指标 (依赖 flow_events 日志)
-        if name in ["max_fct", "max_slowdown"]:
+        fct_metrics = ["max_fct", "p99_fct", "median_fct", "max_slowdown"]
+        if name in fct_metrics:
             if "flow_events" not in logs:
-                return None  # 标记为不可观测，而非 0
+                return None
+
+            if self.flow_df.empty:
+                return 0
+
+            # 统一提取 FCT 数据 (us)
+            fct_us = self.flow_df["fct_ns"] / 1000.0
 
             if name == "max_fct":
-                return (
-                    float(self.flow_df["fct_ns"].max() / 1000.0)
-                    if not self.flow_df.empty
-                    else 0
-                )
-            if name == "max_slowdown":
+                return float(fct_us.max())
+            elif name == "p99_fct":
+                return float(np.percentile(fct_us, 99))
+            elif name == "median_fct":
+                return float(np.median(fct_us))
+            elif name == "max_slowdown":
                 return (
                     float(self.flow_slowdown_df["slowdown"].max())
                     if not self.flow_slowdown_df.empty
@@ -64,6 +71,24 @@ class ExperimentResult:
             if not self.traffic_df.empty:
                 return int(len(self.traffic_df[self.traffic_df["event"] == "RTO"]))
             return 0  # 开了日志但没搜到 RTO，这才是真正的 0
+        # 1. 公平性指标 (Jain's Fairness Index)
+        # 计算同一 Incast 中各流 FCT 的公平程度
+        if name == "fairness_index":
+            if self.flow_df.empty:
+                return 1.0
+            fcts = self.flow_df["fct_ns"].values
+            n = len(fcts)
+            return (np.sum(fcts) ** 2) / (n * np.sum(fcts**2))
+
+        # 2. 稳定性指标 (Stability Index)
+        # 计算 CWND 或 队列 的波动率 (CV = std / mean)
+        if name == "queue_stability":
+            df = self.active_queue_df
+            if df.empty:
+                return 0
+            return (
+                df["max_q"].std() / df["max_q"].mean() if df["max_q"].mean() != 0 else 0
+            )
 
         raise ValueError(f"Unknown metric: {name}")
 
@@ -128,6 +153,10 @@ class ExperimentResult:
         [Core Fix] 整合后的实验参数中心。
         优先级：variables (波动的变量) > command (命令行参数)
         """
+        # 优先从 status.yaml 的新字段 all_params 读取
+        all_p = self.status_data.get("all_params", {})
+        if all_p:
+            return all_p
         # 1. 首先加载命令行中的所有默认参数
         merged = self.command_params.copy()
 
