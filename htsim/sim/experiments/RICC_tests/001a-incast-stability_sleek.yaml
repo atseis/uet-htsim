@@ -1,4 +1,4 @@
-# 文件: configs/diag_baseline_stability_with_sleek.yaml
+# 文件: configs/diag_baseline_stability.yaml
 # 目标: 扫描 20 个种子，寻找 conns=64 时的 Max FCT 崩溃点
 common:
   execute: True
