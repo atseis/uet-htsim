@@ -358,6 +358,9 @@ int main(int argc, char** argv) {
         } else if (!strcmp(argv[i], "-disable_base_rtt_update_on_nack")) {
             UecSrc::update_base_rtt_on_nack = false;
             cout << "Disables using NACKs to update the base RTT." << endl;
+        } else if (!strcmp(argv[i], "-ricc")) {
+            UecSrc::_ricc_enabled = true;
+            cout << "Enable RICC" << endl;
         } else if (!strcmp(argv[i], "-sleek")) {
             UecSrc::_enable_sleek = true;
             cout << "Using SLEEK, the sender-based fast loss recovery heuristic " << endl;

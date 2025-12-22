@@ -101,6 +101,9 @@ private:
 
 class UecSrc : public EventSource, public TriggerTarget, public UecTransportConnection {
 public:
+    // add ricc support
+    static bool _ricc_enabled;
+    // original
     struct Stats {
         /* all must be non-negative, but we'll make them signed so we
            can do maths with them without concern about underflow */

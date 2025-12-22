@@ -79,6 +79,10 @@ bool UecSrc::_disable_quick_adapt = false;
 uint8_t UecSrc::_qa_gate = 0;
 bool UecSrc::update_base_rtt_on_nack = true;
 
+/* RICC parameters */
+bool UecSrc::_ricc_enabled = false;
+/* END RICC parameters */
+
 /* SLEEK parameters */
 bool UecSrc::_enable_sleek = false;
 int UecSrc::probe_first_trial_time = 3;
