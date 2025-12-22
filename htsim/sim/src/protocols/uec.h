@@ -2,20 +2,20 @@
 #ifndef UEC_H
 #define UEC_H
 
-#include <memory>
 #include <list>
-#include <set>
+#include <memory>
 #include <optional>
+#include <set>
 
-#include "uec_base.h"
-#include "eventlist.h"
-#include "trigger.h"
-#include "uecpacket.h"
 #include "circular_buffer.h"
+#include "eventlist.h"
 #include "modular_vector.h"
-#include "pciemodel.h"
 #include "oversubscribed_cc.h"
+#include "pciemodel.h"
+#include "trigger.h"
+#include "uec_base.h"
 #include "uec_mp.h"
+#include "uecpacket.h"
 
 #define timeInf 0
 // min RTO bound in us
@@ -27,7 +27,6 @@ class UecPullPacer;
 class UecSink;
 class UecSrc;
 class UecLogger;
-
 
 // UecNIC aggregates UecSrcs that are on the same NIC.  It round
 // robins between active srcs when we're limited by the sending
@@ -45,6 +44,7 @@ class UecNIC : public EventSource, public NIC {
         UecSrc* src;
         UecSink* sink;
     };
+
 public:
     UecNIC(id_t src_num, EventList& eventList, linkspeed_bps linkspeed, uint32_t ports);
 
@@ -59,10 +59,10 @@ public:
     uint32_t findFreePort();
     void doNextEvent();
 
-    linkspeed_bps linkspeed() const {return _linkspeed;}
+    linkspeed_bps linkspeed() const { return _linkspeed; }
 
     int activeSources() const { return _active_srcs.size(); }
-    virtual const string& nodename() const {return _nodename;}
+    virtual const string& nodename() const { return _nodename; }
     list<UecSrc*> _active_srcs;
 
 private:
@@ -89,9 +89,10 @@ class UecSrcPort : public PacketSink {
 public:
     UecSrcPort(UecSrc& src, uint32_t portnum);
     void setRoute(const Route& route);
-    inline const Route* route() const {return _route;}
+    inline const Route* route() const { return _route; }
     virtual void receivePacket(Packet& pkt);
     virtual const string& nodename();
+
 private:
     UecSrc& _src;
     uint8_t _port_num;
@@ -123,32 +124,38 @@ public:
         mem_b dec_quick_bytes;
         mem_b dec_nack_bytes;
     };
-    UecSrc(TrafficLogger* trafficLogger, 
-           EventList& eventList, 
+    UecSrc(TrafficLogger* trafficLogger,
+           EventList& eventList,
            unique_ptr<UecMultipath> mp,
-           UecNIC& nic, 
-           uint32_t no_of_ports, 
+           UecNIC& nic,
+           uint32_t no_of_ports,
            bool rts = false);
     void delFromSendTimes(simtime_picosec time, UecDataPacket::seq_t seq_no);
     /**
      * Initialize global NSCC parameters.
      */
-    static void initNsccParams(simtime_picosec network_rtt, linkspeed_bps linkspeed, 
-                               simtime_picosec target_Qdelay, int8_t qa_gate,
+    static void initNsccParams(simtime_picosec network_rtt,
+                               linkspeed_bps linkspeed,
+                               simtime_picosec target_Qdelay,
+                               int8_t qa_gate,
                                bool trimming_enabled);
     /**
      * Initialize per-connection NSCC parameters.
      */
-    void initNscc(mem_b cwnd, simtime_picosec peer_rtt=UecSrc::_network_rtt);
+    void initNscc(mem_b cwnd, simtime_picosec peer_rtt = UecSrc::_network_rtt);
     /**
      * Initialize per-connection RCCC parameters.
      */
-    void initRccc(mem_b cwnd,simtime_picosec peer_rtt=UecSrc::_network_rtt);
+    void initRccc(mem_b cwnd, simtime_picosec peer_rtt = UecSrc::_network_rtt);
 
     void logFlowEvents(FlowEventLogger& flow_logger) { _flow_logger = &flow_logger; }
-    virtual void connectPort(uint32_t portnum, Route& routeout, Route& routeback, UecSink& sink, simtime_picosec start);
-    const Route* getPortRoute(uint32_t port_num) const {return _ports[port_num]->route();}
-    UecSrcPort* getPort(uint32_t port_num) {return _ports[port_num];}
+    virtual void connectPort(uint32_t portnum,
+                             Route& routeout,
+                             Route& routeback,
+                             UecSink& sink,
+                             simtime_picosec start);
+    const Route* getPortRoute(uint32_t port_num) const { return _ports[port_num]->route(); }
+    UecSrcPort* getPort(uint32_t port_num) { return _ports[port_num]; }
     void timeToSend(const Route& route);
     void receivePacket(Packet& pkt, uint32_t portnum);
     void doNextEvent();
@@ -160,7 +167,9 @@ public:
     virtual void startConnection() override;
     virtual bool hasStarted() override;
     virtual bool isActivelySending() override;
-    virtual void makeReusable(UecMsgTracker* conn_reuse_tracker) override { _msg_tracker.emplace(conn_reuse_tracker); };
+    virtual void makeReusable(UecMsgTracker* conn_reuse_tracker) override {
+        _msg_tracker.emplace(conn_reuse_tracker);
+    };
     virtual void addToBacklog(mem_b size) override;
 
     static void setMinRTO(uint32_t min_rto_in_us) {
@@ -175,18 +184,17 @@ public:
         _maxwnd = maxwnd;
     }
 
-    void setConfiguredMaxWnd(mem_b wnd){
-        _configured_maxwnd = wnd;
-    }
+    void setConfiguredMaxWnd(mem_b wnd) { _configured_maxwnd = wnd; }
 
-    void boundBaseRTT(simtime_picosec network_rtt){
+    void boundBaseRTT(simtime_picosec network_rtt) {
         _base_rtt = network_rtt;
         _bdp = timeAsUs(_base_rtt) * _nic.linkspeed() / 8000000;
-        _maxwnd =  1.5*_bdp;
+        _maxwnd = 1.5 * _bdp;
         _configured_maxwnd = _maxwnd;
 
-        if (!_shown){
-            cout << "Bound base RTT: _bdp " << _bdp << " _maxwnd " << _maxwnd << " _base_rtt " << timeAsUs(_base_rtt) << endl;
+        if (!_shown) {
+            cout << "Bound base RTT: _bdp " << _bdp << " _maxwnd " << _maxwnd << " _base_rtt "
+                 << timeAsUs(_base_rtt) << endl;
             _shown = true;
         }
     }
@@ -212,7 +220,7 @@ public:
     static bool _sender_based_cc;
     static bool _receiver_based_cc;
 
-    enum Sender_CC { DCTCP, NSCC, CONSTANT};
+    enum Sender_CC { DCTCP, NSCC, CONSTANT };
     static Sender_CC _sender_cc_algo;
 
     static bool _disable_quick_adapt;
@@ -222,7 +230,10 @@ public:
     static bool _enable_sleek;
 
     virtual const string& nodename() { return _nodename; }
-    virtual void setName(const string& name) override { _name=name; _mp->set_debug_tag(name); }
+    virtual void setName(const string& name) override {
+        _name = name;
+        _mp->set_debug_tag(name);
+    }
     inline void setFlowId(flowid_t flow_id) { _flow.set_flowid(flow_id); }
     void setFlowsize(uint64_t flow_size_in_bytes);
     mem_b flowsize() { return _flow_size; }
@@ -236,14 +247,14 @@ public:
     bool _debug_src;
     bool debug() const { return _debug_src; }
 
-   private:
+private:
     unique_ptr<UecMultipath> _mp;
     UecNIC& _nic;
     uint32_t _no_of_ports;
-    vector <UecSrcPort*> _ports;
+    vector<UecSrcPort*> _ports;
     struct sendRecord {
         // need a constructor to be able to put this in a map
-        sendRecord(mem_b psize, simtime_picosec stime) : pkt_size(psize), send_time(stime){};
+        sendRecord(mem_b psize, simtime_picosec stime) : pkt_size(psize), send_time(stime) {};
         mem_b pkt_size;
         simtime_picosec send_time;
     };
@@ -294,7 +305,7 @@ public:
     void processPull(const UecPullPacket& pkt);
     void runSleek(uint32_t ooo, UecBasePacket::seq_t cum_ack);
 
-    //added for NSCC
+    // added for NSCC
     bool can_send_NSCC(mem_b pkt_size);
     bool can_send_RCCC();
     void set_cwnd_bounds();
@@ -324,8 +335,8 @@ public:
     // unlike in the NDP simulator, we maintain all the main quantities in bytes
     mem_b _flow_size;
     bool _done_sending;  // make sure we only trigger once
-    optional<UecMsgTracker*> _msg_tracker;  
-    mem_b _backlog;      // how much we need to send, not including retransmissions
+    optional<UecMsgTracker*> _msg_tracker;
+    mem_b _backlog;  // how much we need to send, not including retransmissions
     mem_b _rtx_backlog;
     mem_b _cwnd;
     mem_b _maxwnd;
@@ -345,17 +356,18 @@ public:
 
     // Record last time this UecSrc was scheduled.
     optional<simtime_picosec> _last_event_time;
+
 public:
-    static linkspeed_bps _reference_network_linkspeed; 
-    static simtime_picosec _reference_network_rtt; 
-    static mem_b _reference_network_bdp; 
-    static linkspeed_bps _network_linkspeed; 
-    static simtime_picosec _network_rtt; 
-    static mem_b _network_bdp; 
-    static bool _network_trimming_enabled; 
+    static linkspeed_bps _reference_network_linkspeed;
+    static simtime_picosec _reference_network_rtt;
+    static mem_b _reference_network_bdp;
+    static linkspeed_bps _network_linkspeed;
+    static simtime_picosec _network_rtt;
+    static mem_b _network_bdp;
+    static bool _network_trimming_enabled;
     // Smarttrack parameters
-    static mem_b _min_cwnd; 
-    static uint32_t _qa_scaling; 
+    static mem_b _min_cwnd;
+    static uint32_t _qa_scaling;
     static simtime_picosec _target_Qdelay;
     static double _gamma;
     static double _alpha;
@@ -366,18 +378,19 @@ public:
     static double _scaling_factor_a;
     static double _scaling_factor_b;
     static double _eta;
-    static double _qa_threshold; 
+    static double _qa_threshold;
     static double _delay_alpha;
     // static double _ecn_thresh;
     static uint32_t _adjust_bytes_threshold;
     static simtime_picosec _adjust_period_threshold;
-    //debug
+    // debug
     static flowid_t _debug_flowid;
+
 private:
     bool quick_adapt(bool is_loss, bool skip, simtime_picosec delay);
     void fair_increase(uint32_t newly_acked_bytes);
-    void proportional_increase(uint32_t newly_acked_bytes,simtime_picosec delay);
-    void fast_increase(uint32_t newly_acked_bytes,simtime_picosec delay);
+    void proportional_increase(uint32_t newly_acked_bytes, simtime_picosec delay);
+    void fast_increase(uint32_t newly_acked_bytes, simtime_picosec delay);
     // void fair_decrease(bool can_decrease, uint32_t newly_acked_bytes);
     void multiplicative_decrease();
     void fulfill_adjustment();
@@ -395,15 +408,14 @@ private:
     simtime_picosec _last_rts;       // time when we last sent an RTS (or zero if never sent)
     EventList::Handle _rto_timer_handle;
 
-
-    //used to drive ACK clock
+    // used to drive ACK clock
     uint64_t _recvd_bytes;
 
     // Smarttrack sender based CC variables.
     simtime_picosec _base_rtt;
     mem_b _base_bdp;
     mem_b _achieved_bytes = 0;
-    //used to trigger SmartTrack fulfill
+    // used to trigger SmartTrack fulfill
     mem_b _received_bytes = 0;
     uint32_t _fi_count = 0;
     bool _trigger_qa = false;
@@ -422,20 +434,19 @@ private:
     /******** SLEEK parameters *********/
 
     static float loss_retx_factor;
-    static int min_retx_config ;
+    static int min_retx_config;
     bool _loss_recovery_mode = false;
     uint32_t _recovery_seqno = 0;
     /******** END SLEEK parameters *********/
 
-    /******** Probe parameters *********/    
+    /******** Probe parameters *********/
     static int probe_first_trial_time;
     static int probe_retry_time;
     simtime_picosec _probe_timer_when = 0;
-    simtime_picosec _probe_seqno = 0; 
-    simtime_picosec _probe_send_time = 0; 
-    EventList::Handle _probe_timer_handle; 
+    simtime_picosec _probe_seqno = 0;
+    simtime_picosec _probe_send_time = 0;
+    EventList::Handle _probe_timer_handle;
     /******** END Probe parameters *********/
-
 
     // Connectivity
     PacketFlow _flow;
@@ -449,9 +460,10 @@ class UecSinkPort : public PacketSink {
 public:
     UecSinkPort(UecSink& sink, uint32_t portnum);
     void setRoute(const Route& route);
-    inline const Route* route() const {return _route;}
+    inline const Route* route() const { return _route; }
     virtual void receivePacket(Packet& pkt);
     virtual const string& nodename();
+
 private:
     UecSink& _sink;
     uint8_t _port_num;
@@ -459,7 +471,7 @@ private:
 };
 
 class UecSink : public DataReceiver {
-   public:
+public:
     struct Stats {
         uint64_t received;
         uint64_t bytes_received;
@@ -472,13 +484,17 @@ class UecSink : public DataReceiver {
         uint64_t ecn_bytes_received;
     };
 
-    UecSink(TrafficLogger* trafficLogger, UecPullPacer* pullPacer, UecNIC& nic, uint32_t no_of_ports);
     UecSink(TrafficLogger* trafficLogger,
-             linkspeed_bps linkSpeed,
-             double rate_modifier,
-             uint16_t mtu,
-             EventList& eventList,
-             UecNIC& nic, uint32_t no_of_ports);
+            UecPullPacer* pullPacer,
+            UecNIC& nic,
+            uint32_t no_of_ports);
+    UecSink(TrafficLogger* trafficLogger,
+            linkspeed_bps linkSpeed,
+            double rate_modifier,
+            uint16_t mtu,
+            EventList& eventList,
+            UecNIC& nic,
+            uint32_t no_of_ports);
     void receivePacket(Packet& pkt, uint32_t port_num);
 
     void processData(UecDataPacket& pkt);
@@ -502,7 +518,11 @@ class UecSink : public DataReceiver {
     UecBasePacket::seq_t sackBitmapBase(UecBasePacket::seq_t epsn);
     UecBasePacket::seq_t sackBitmapBaseIdeal();
     uint64_t buildSackBitmap(UecBasePacket::seq_t ref_epsn);
-    UecAckPacket* sack(uint16_t path_id, UecBasePacket::seq_t seqno, UecBasePacket::seq_t acked_psn, bool ce, bool rtx_echo);
+    UecAckPacket* sack(uint16_t path_id,
+                       UecBasePacket::seq_t seqno,
+                       UecBasePacket::seq_t acked_psn,
+                       bool ce,
+                       bool rtx_echo);
 
     UecNackPacket* nack(uint16_t path_id, UecBasePacket::seq_t seqno, bool last_hop, bool ecn_echo);
 
@@ -522,8 +542,8 @@ class UecSink : public DataReceiver {
     UecBasePacket::pull_quanta rtx_backlog() { return _retx_backlog; }
     const Stats& stats() const { return _stats; }
     void connectPort(uint32_t port_num, UecSrc& src, const Route& routeback);
-    const Route* getPortRoute(uint32_t port_num) const {return _ports[port_num]->route();}
-    UecSinkPort* getPort(uint32_t port_num) {return _ports[port_num];}
+    const Route* getPortRoute(uint32_t port_num) const { return _ports[port_num]->route(); }
+    UecSinkPort* getPort(uint32_t port_num) { return _ports[port_num]; }
     void setSrc(uint32_t s) { _srcaddr = s; }
     inline void setFlowId(flowid_t flow_id) { _flow.set_flowid(flow_id); }
 
@@ -542,32 +562,35 @@ class UecSink : public DataReceiver {
     }
     inline UecNIC* getNIC() const { return &_nic; }
 
-    inline void setPCIeModel(PCIeModel* c){assert(_model_pcie); _pcie = c;}
-    inline void setOversubscribedCC(OversubscribedCC* c){_receiver_cc = c;}
+    inline void setPCIeModel(PCIeModel* c) {
+        assert(_model_pcie);
+        _pcie = c;
+    }
+    inline void setOversubscribedCC(OversubscribedCC* c) { _receiver_cc = c; }
 
     uint16_t nextEntropy();
 
     UecSrc* getSrc() { return _src; }
     uint32_t getConfiguredMaxWnd() { return _src->configuredMaxWnd(); };
 
-    PCIeModel* pcieModel() const{ return _pcie;}
+    PCIeModel* pcieModel() const { return _pcie; }
 
     static mem_b _bytes_unacked_threshold;
     static uint16_t _mtus_per_pull;
     static UecBasePacket::pull_quanta _credit_per_pull;
     static int TGT_EV_SIZE;
 
-    static bool _receiver_oversubscribed_cc; 
+    static bool _receiver_oversubscribed_cc;
 
     // for sink logger
     inline mem_b total_received() const { return _stats.bytes_received; }
     uint32_t reorder_buffer_size();  // count is in packets
 
-    inline UecPullPacer* pullPacer() const {return _pullPacer;}
+    inline UecPullPacer* pullPacer() const { return _pullPacer; }
 
-   private:
+private:
     uint32_t _no_of_ports;
-    vector <UecSinkPort*> _ports;
+    vector<UecSinkPort*> _ports;
     uint32_t _srcaddr;
     UecNIC& _nic;
     UecSrc* _src;
@@ -584,15 +607,15 @@ class UecSink : public DataReceiver {
     bool _in_pull;       // this tunnel is in the pull queue.
     bool _in_slow_pull;  // this tunnel is in the slow pull queue.
 
-
-    //received payload bytes, used to decide when flow has finished.
+    // received payload bytes, used to decide when flow has finished.
     mem_b _received_bytes;
     uint16_t _accepted_bytes;
 
-    //used to help the sender slide his window.
+    // used to help the sender slide his window.
     uint64_t _recvd_bytes;
-    //used for flow control in sender CC mode. 
-    //decides whether to reduce cwnd at sender; will change dynamically based on receiver resource availability. 
+    // used for flow control in sender CC mode.
+    // decides whether to reduce cwnd at sender; will change dynamically based on receiver resource
+    // availability.
     uint8_t _rcv_cwnd_pen;
 
     Trigger* _end_trigger;
@@ -604,7 +627,7 @@ class UecSink : public DataReceiver {
 
     uint16_t _entropy;
 
-    //variables for PCIe model
+    // variables for PCIe model
     PCIeModel* _pcie;
     OversubscribedCC* _receiver_cc;
 
@@ -617,25 +640,25 @@ public:
 };
 
 class UecPullPacer : public EventSource {
-   public:
-    enum reason {PCIE = 0, OVERSUBSCRIBED_CC = 1};
+public:
+    enum reason { PCIE = 0, OVERSUBSCRIBED_CC = 1 };
 
     UecPullPacer(linkspeed_bps linkSpeed,
-                  double pull_rate_modifier,
-                  uint16_t bytes_credit_per_pull,
-                  EventList& eventList,
-                  uint32_t no_of_ports);
+                 double pull_rate_modifier,
+                 uint16_t bytes_credit_per_pull,
+                 EventList& eventList,
+                 uint32_t no_of_ports);
     void doNextEvent();
     void requestPull(UecSink* sink);
 
     bool isActive(UecSink* sink);
     bool isIdle(UecSink* sink);
 
-    inline linkspeed_bps linkspeed() const {return _linkspeed;}
+    inline linkspeed_bps linkspeed() const { return _linkspeed; }
 
-    void updatePullRate(reason r,double relative_rate);
+    void updatePullRate(reason r, double relative_rate);
 
-   private:
+private:
     list<UecSink*> _active_senders;  // TODO priorities?
     list<UecSink*> _idle_senders;    // TODO priorities?
 
@@ -643,7 +666,7 @@ class UecPullPacer : public EventSource {
     simtime_picosec _actual_time_per_quanta;
 
     bool _active;
-    
+
     double _rates[2];
 
     linkspeed_bps _linkspeed;

@@ -1,4 +1,4 @@
-// -*- c-basic-offset: 4; indent-tabs-mode: nil -*- 
+// -*- c-basic-offset: 4; indent-tabs-mode: nil -*-
 
 #ifndef TRIGGER_H
 #define TRIGGER_H
@@ -17,10 +17,10 @@
 
 #include <vector>
 #include "config.h"
-#include "network.h"
 #include "eventlist.h"
+#include "network.h"
 
-#define TRIGGER_START ((simtime_picosec)-1)
+#define TRIGGER_START ((simtime_picosec) - 1)
 typedef uint32_t triggerid_t;
 
 // Triggers call activate on TriggerTargets to cause them to do something.
@@ -37,19 +37,21 @@ public:
     void add_target(TriggerTarget& target);
     virtual void activate() = 0;
     triggerid_t get_id() { return _id; };
+
 protected:
-    EventList &_eventlist;
+    EventList& _eventlist;
     triggerid_t _id;
-    vector <TriggerTarget*> _targets;
+    vector<TriggerTarget*> _targets;
 };
 
 // SingleShotTrigger takes one or more trigger targets and activates
 // them all on the first call to activate().  Will abort if called
 // twice as most targets cannot be restarted.
-class SingleShotTrigger: public Trigger {
+class SingleShotTrigger : public Trigger {
 public:
     SingleShotTrigger(EventList& eventlist, triggerid_t id);
     virtual void activate();
+
 private:
     bool _done;
 };
@@ -57,10 +59,11 @@ private:
 // MultiShotTrigger takes count trigger targets and activates
 // them sequentially when its own activate() is called.  Will abort if called
 // more than count.
-class MultiShotTrigger: public Trigger {
+class MultiShotTrigger : public Trigger {
 public:
     MultiShotTrigger(EventList& eventlist, triggerid_t id);
     virtual void activate();
+
 private:
     uint32_t _next;
 };
@@ -68,14 +71,13 @@ private:
 // BarrierTrigger takes one of more trigger events, and a count of the
 // number of activations needed before it triggers.  Needs precisely
 // this many activations before it will fire.
-class BarrierTrigger: public Trigger {
+class BarrierTrigger : public Trigger {
 public:
     BarrierTrigger(EventList& eventlist, triggerid_t id, size_t activations_needed);
     virtual void activate();
+
 private:
     size_t _activations_remaining;
 };
 
 #endif
-
-    

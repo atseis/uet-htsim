@@ -2,23 +2,23 @@
 #ifndef connection_matrix
 #define connection_matrix
 
-#include "main.h"
-#include "tcp.h"
-#include "topology.h"
-#include "randomqueue.h"
-#include "fat_tree_switch.h"
-#include "eventlist.h"
 #include <list>
 #include <map>
-#include <optional>
 #include <memory>
+#include <optional>
+#include "eventlist.h"
+#include "fat_tree_switch.h"
+#include "main.h"
+#include "randomqueue.h"
+#include "tcp.h"
+#include "topology.h"
 
 #define NO_START ((simtime_picosec)0xffffffffffffffff)
 
-struct connection{
+struct connection {
     int src, dst, size;
-    flowid_t flowid; 
-    optional<uint32_t> msgid; 
+    flowid_t flowid;
+    optional<uint32_t> msgid;
     triggerid_t send_done_trigger;
     triggerid_t recv_done_trigger;
     triggerid_t trigger;
@@ -26,28 +26,27 @@ struct connection{
     int priority;
 };
 
-typedef enum {UNSPECIFIED, SINGLE_SHOT, MULTI_SHOT, BARRIER} trigger_type;
+typedef enum { UNSPECIFIED, SINGLE_SHOT, MULTI_SHOT, BARRIER } trigger_type;
 
 // hold (temporary) state to set up trigger
 struct trigger {
     triggerid_t id;
     trigger_type type;
-    int count; // used for barriers
-    vector <flowid_t> flows; // flows to be triggered by this trigger
-    Trigger *trigger;  // the actual trigger
+    int count;               // used for barriers
+    vector<flowid_t> flows;  // flows to be triggered by this trigger
+    Trigger* trigger;        // the actual trigger
 };
 
-//describe link failures
+// describe link failures
 struct failure {
     FatTreeSwitch::switch_type switch_type;
     uint32_t switch_id;
     uint32_t link_id;
 };
 
-
-class ConnectionMatrix{
+class ConnectionMatrix {
 public:
-    ConnectionMatrix(uint32_t );
+    ConnectionMatrix(uint32_t);
     void addConnection(uint32_t src, uint32_t dest);
     void setPermutation(uint32_t conn);
     void setPermutation(uint32_t conn, uint32_t rack_size);
@@ -63,17 +62,17 @@ public:
     void setHotspot(uint32_t hosts_per_spot, uint32_t count);
     void setHotspotOutcast(uint32_t hosts_per_hotspot, uint32_t count);
     void setIncastLocalPerm(uint32_t hosts_per_hotspot);
-  
+
     void setIncast(uint32_t hosts_per_hotspot, uint32_t center);
     void setOutcast(uint32_t src, uint32_t hosts_per_hotspot, uint32_t center);
     void setManytoMany(uint32_t hosts);
 
-    bool save(const char * filename);
+    bool save(const char* filename);
     bool save(FILE*);
-    bool load(const char * filename);  
+    bool load(const char* filename);
     /*bool load(FILE*);*/
     bool load(istream& file);
-  
+
     vector<connection*>* getAllConnections();
     Trigger* getTrigger(triggerid_t id, EventList& eventlist);
     void bindTriggers(connection* c, EventList& eventlist);
@@ -81,7 +80,8 @@ public:
     uint32_t N;
     unique_ptr<vector<connection*>> conns;
     map<uint32_t, vector<uint32_t>*> connections;
-    vector<failure*> failures; 
+    vector<failure*> failures;
+
 private:
     map<triggerid_t, trigger*> triggers;
 };
