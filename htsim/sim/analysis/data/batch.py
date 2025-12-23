@@ -470,6 +470,19 @@ class BatchVisualizer:
         name_map = {"max_fct": "Max", "p99_fct": "P99", "median_fct": "Median"}
         df_long["Metric"] = df_long["Metric"].map(name_map)
 
+        # --- 【关键修正 A】: 执行物理逻辑排序 ---
+        # 理由：磁盘 glob 加载是无序的。我们需要提取 ecn 字符串（如 "4 20"）中的第一个数字进行排序。
+        def get_sort_key(val):
+            try:
+                # 尝试取第一个空格前的数字，如果是纯数字则直接转换
+                return float(str(val).split()[0])
+            except (ValueError, AttributeError, IndexError):
+                return 0.0
+
+        df_long["_sort_order"] = df_long[x].apply(get_sort_key)
+        df_long = df_long.sort_values("_sort_order").drop(columns=["_sort_order"])
+        # ----------------------------------------
+
         # 4. 绘图风格设置 (参考 image_62442b 样式)
         plt.figure(figsize=(12, 7))
         sns.set_theme(style="whitegrid", font_scale=1.1)
@@ -490,6 +503,7 @@ class BatchVisualizer:
             palette="husl",  # 高对比度配色
             linewidth=2,
             markersize=8,
+            sort=False,
         )
 
         # 5. 细节优化与格式化
@@ -497,8 +511,16 @@ class BatchVisualizer:
         ax.set_ylabel("Flow Completion Time (us)")
         ax.set_xlabel(x.replace("_", " ").capitalize())
 
+        # --- 【关键修正 B】: 类型敏感的 X 轴格式化 ---
+        # 理由：之前强制执行 _fmt_plain 会把分类标签的索引(0,1...)转为字符串。
+        # 仅当 X 轴数据本身是数值类型（如 nodes）时才使用自定义格式化器。
+        is_x_numeric = pd.api.types.is_numeric_dtype(df_long[x])
+        if is_x_numeric:
+            ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+        # 如果是字符串（如 "4 20"），保持默认，Matplotlib 将显示原始标签。
+
         # 强制拒绝科学计数法
-        ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+        # ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
 
         # 优化图例布局，防止遮挡曲线
@@ -554,4 +576,3 @@ class BatchVisualizer:
 
         plt.show()
         return ax
-

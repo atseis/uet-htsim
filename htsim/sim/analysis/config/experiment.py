@@ -263,7 +263,9 @@ def run_experiment(
                 for key in variable_keys:
                     val = {**t_var, **s_var}.get(key)
                     if val is not None and not isinstance(val, dict):
-                        label_parts.append(f"{key}{val}")
+                        # [关键修复] 将变量值转为字符串并将其中的空格替换为下划线
+                        clean_val = str(val).replace(" ", "_")
+                        label_parts.append(f"{key}{clean_val}")
                 # label_suffix = "_".join(label_parts) or "default"
                 label_suffix = exp_name + "_".join(label_parts) or exp_name
 
