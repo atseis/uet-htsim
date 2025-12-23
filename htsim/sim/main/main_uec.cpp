@@ -705,8 +705,10 @@ int main(int argc, char** argv) {
     if (ecn) {
         uint32_t bdp_pkt = calculate_bdp_pkt(topo_cfg.get(), linkspeed);
         if (!param_ecn_set) {
-            ecn_low = memFromPkt(ceil(bdp_pkt * 0.2));
-            ecn_high = memFromPkt(ceil(bdp_pkt * 0.8));
+            ecn_low = ceil(queuesize * 0.2);
+            ecn_high = ceil(queuesize * 0.8);
+            // ecn_low = memFromPkt(ceil(bdp_pkt * 0.2));
+            // ecn_high = memFromPkt(ceil(bdp_pkt * 0.8));
         } else {
             ecn_low = memFromPkt(ecn_low);
             ecn_high = memFromPkt(ecn_high);

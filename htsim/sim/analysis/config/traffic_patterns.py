@@ -376,11 +376,22 @@ def generate_incast_traffic(
         shuffle(srcs)
     # 否则，只从拓扑后半部分选择源节点
     else:
-        for n in range(int(nodes / 2), nodes):
-            srcs.append(n)
-        if randseed != 0:
-            seed(randseed)
-        shuffle(srcs)
+        remote_cnt = nodes - int(nodes / 2)
+        if conns > remote_cnt:
+            for n in range(1, int(nodes / 2)):
+                srcs.append(n)
+            if randseed != 0:
+                seed(randseed)
+            remote_half = list(range(int(nodes / 2), nodes))
+            shuffle(remote_half)
+            shuffle(srcs)
+            srcs = remote_half + srcs
+        else:
+            for n in range(int(nodes / 2), nodes):
+                srcs.append(n)
+            if randseed != 0:
+                seed(randseed)
+            shuffle(srcs)
     # 目标节点固定，为 0
     dst = "0"
     for n in range(conns):
