@@ -96,14 +96,18 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
     """将字典转换为命令行参数列表 [-k v ...]"""
     flags: List[str] = []
     for k, v in params.items():
+        if v is None or (isinstance(v, str) and v.lower() == "none"):
+            continue
+        if isinstance(v, bool):
+            if v:
+                flags.append(f"-{k}")  # 仅在 True 时添加“开关型参数”
+            continue
         if k == "log" and isinstance(v, list):
             for log_val in v:
                 flags.extend([f"-{k}", str(log_val)])
             continue
         if isinstance(v, (list, dict)):
             continue
-        if isinstance(v, bool):
-            v = 1 if v else 0
         flags.extend([f"-{k}", str(v)])
     return flags
 
@@ -328,6 +332,21 @@ def run_experiment(
         for task in to_run:
             label = task["label_suffix"]
             progress.update(tid, status=f"[cyan]{label}[/cyan]")
+
+            # ================= [新逻辑: 处理 force_rerun 缓存清理] =================
+            if force_rerun:
+                # 1. 强制清理 summary.json (ExperimentResult 的核心指标缓存)
+                # 理由：防止重新运行后由于 Parser 未运行或失败而导致分析工具读取旧指标
+                summary_file = task["out_name"] / "summary.json"
+                if summary_file.exists():
+                    summary_file.unlink()
+
+                # 2. (可选) 清理旧的 stdout.log 以保证日志纯净
+                # old_stdout = task["out_name"] / "stdout.log"
+                # if old_stdout.exists():
+                #     old_stdout.unlink()
+            # =====================================================================
+
             start_time = datetime.datetime.now()
 
             try:
