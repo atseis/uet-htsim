@@ -1,0 +1,49 @@
+common:
+  execute: True
+  traffic:
+    type: incast
+    nodes: 432
+    flowsize: "50KB"
+    extrastarttime: 0    # 绝对同步 (Worst Case)
+    prefer_remote: 1     # 强制跨机架
+
+  simulation:
+    tiers: 3
+    linkspeed: 100000
+    mtu: 4150
+    hop_latency: 1
+    switch_latency: 0
+    strat: ecmp_host
+    load_balancing_algo: mixed
+    paths: 64
+    logtime: 0.1
+    end: 2000
+    log:
+      - sink
+      - flow_events
+
+experiments:
+  - name: baseline_stability_check
+    exe: htsim_uec
+    protocol: uec
+
+    # LHS 采样：在 randseed / target_q_delay 上做 2 维连续采样
+    sampling:
+      method: lhs
+      samples: 20
+      seed: 42
+      continuous: [randseed, target_q_delay]
+
+    traffic:
+      conns: [64]        # 锁定“事故点”
+      randseed: [1, 50]  # 整数区间：1~50 之间的随机种子
+
+    simulation:
+      sender_cc_algo: nscc
+      # target_q_delay: 整数区间 [1, 50] us，用于 LHS
+      target_q_delay: [1, 50]
+      queue_size_bdp_factor: [4, 8, 12]  # 离散三个 BDP 因子
+      queue_type: composite
+      sleek: [False, True]              # 是否启用 SLEEK
+      # ECN 阈值：低/高水位，当前版本仅支持离散/固定，不参与 LHS
+      ecn: [4, 20]

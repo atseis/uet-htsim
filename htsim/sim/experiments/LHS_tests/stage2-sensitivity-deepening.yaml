@@ -1,0 +1,66 @@
+# 阶段 2: 敏感性深化
+# 目标：基于阶段 1 结果，聚焦高敏感变量，测试交互
+# 维度：8-10，样本数：250
+
+common:
+  execute: True
+  traffic:
+    type: incast
+    nodes: 432
+    flowsize: "50KB"
+    extrastarttime: 0
+    prefer_remote: 1
+    conns: 64
+    randseed: 123
+
+
+  simulation:
+    tiers: 3
+    planes: 1
+    switch_latency: 0
+    logtime: 0.1
+    end: 20000
+    seed: 123
+    log:
+      - flow_events
+      - queue_usage
+    # 固定参数（基于阶段 1 结果，低敏感参数固定）
+    disable_trim: false
+    # 如果阶段 1 显示 strat 不敏感，可固定为 ecmp_host_ecn
+    # strat: ecmp_host_ecn
+
+experiments:
+  - name: stage2_sensitivity
+    exe: htsim_uec
+    protocol: uec
+
+    sampling:
+      method: lhs
+      samples: 200
+      seed: 123
+      continuous: [queue_size_bdp_factor, ecn_low, ecn_high, cwnd]
+      # Removing linkspeed from sampling, fixing it below
+      log_continuous: [flowsize]
+
+    simulation:
+      # Fixed High Speed Environment (Stress Test)
+      linkspeed: 400000
+      mtu: 4150
+      hop_latency: 1
+      switch_latency: 0
+      
+      # Variable Stressors
+      # Sweeping connections manually via Cartesian product is safer than LHS for integers if we want specific massive bursts
+      # FIXED: Max nodes is 432, so conns must be < 432. Capping at 400.
+      conns: [64, 128, 256, 400] 
+      
+      # LHS Sampled Control Variables
+      queue_size_bdp_factor: [0.1, 2.0]      # Focus on SMALL buffers (0.1 to 2.0 BDP)
+      ecn_low: [0.05, 0.2]                   # Aggressive ECN
+      ecn_high: [0.2, 0.5]
+      cwnd: [50, 500]                        # Larger windows
+      flowsize: [50000, 500000]              # Mid-sized chunks (50KB-500KB)
+      
+      # Discrete
+      strat: [ecmp_host_ecn]                 # Fix strategy to isolate buffer physics
+      # queue_type: composite_ecn # Conflict with ecmp_host_ecn strategy which enforces COMPOSITE_ECN_LB]

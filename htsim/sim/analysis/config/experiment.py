@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 from . import traffic_patterns, status
 from ..runner import run_sim
+from . import sampling as sampling_utils
 from ..plot import (
     plot_fct_comparison,
     plot_cct_comparison,
@@ -98,6 +99,17 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
     for k, v in params.items():
         if v is None or (isinstance(v, str) and v.lower() == "none"):
             continue
+        # 特殊处理多参数选项 ecn: "low high" 或 ecn: ["4 20", "10 40", ...]
+        # 也支持 ecn_low/ecn_high 分别采样后合成
+        if k == "ecn":
+            if isinstance(v, str):
+                parts = v.split()
+                if len(parts) == 2:
+                    flags.extend(["-ecn", parts[0], parts[1]])
+            continue
+        # 跳过 ecn_low/ecn_high，它们会在后面统一处理
+        if k in ("ecn_low", "ecn_high"):
+            continue
         if isinstance(v, bool):
             if v:
                 flags.append(f"-{k}")  # 仅在 True 时添加“开关型参数”
@@ -109,6 +121,13 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
         if isinstance(v, (list, dict)):
             continue
         flags.extend([f"-{k}", str(v)])
+    
+    # 处理 ecn_low/ecn_high 合成 -ecn（如果存在）
+    ecn_low = params.get("ecn_low")
+    ecn_high = params.get("ecn_high")
+    if ecn_low is not None and ecn_high is not None:
+        flags.extend(["-ecn", str(ecn_low), str(ecn_high)])
+    
     return flags
 
 
@@ -211,6 +230,7 @@ def run_experiment(
     common = config.get("common", {})
     common_traffic = common.get("traffic", {})
     common_sim = common.get("simulation", {})
+    common_sampling = common.get("sampling", {})
     common_flat = {
         k: v for k, v in common.items() if k not in ("traffic", "simulation")
     }
@@ -230,21 +250,11 @@ def run_experiment(
 
     # === 展开参数组合 ===
     experiments = config.get("experiments", [])
-    all_exp_variants = []
-    for exp_idx, exp in enumerate(experiments):
-        exp_name = exp.get("name", f"exp_{exp_idx}")
-        base_traffic = deep_merge(common_traffic, exp.get("traffic", {}))
-        base_sim = deep_merge(common_sim, exp.get("simulation", {}))
-        for t_var in expand_params_tree(base_traffic):
-            for s_var in expand_params_tree(base_sim):
-                all_exp_variants.append(
-                    {**common_flat, **t_var, **s_var, "name": exp_name}
-                )
 
-    variable_keys = identify_variable_keys(all_exp_variants)
-
-    # === 构建任务列表 ===
+    # === 构建任务列表（支持 sampling） ===
     planned_tasks = []
+    all_exp_variants = []
+
     for exp_idx, exp in enumerate(experiments):
         exp_name = exp.get("name", f"exp_{exp_idx}")
         exe = exp.get("exe")
@@ -254,37 +264,74 @@ def run_experiment(
 
         base_traffic = deep_merge(common_traffic, exp.get("traffic", {}))
         base_sim = deep_merge(common_sim, exp.get("simulation", {}))
-        traffic_variants = expand_params_tree(base_traffic)
-        sim_variants = expand_params_tree(base_sim)
+        exp_sampling = deep_merge(common_sampling, exp.get("sampling", {}))
 
-        for t_var in traffic_variants:
-            for s_var in sim_variants:
-                label_parts = []
-                for key in variable_keys:
-                    val = {**t_var, **s_var}.get(key)
-                    if val is not None and not isinstance(val, dict):
-                        # [关键修复] 将变量值转为字符串并将其中的空格替换为下划线
-                        clean_val = str(val).replace(" ", "_")
-                        label_parts.append(f"{key}{clean_val}")
-                # label_suffix = "_".join(label_parts) or "default"
-                label_suffix = exp_name + "_".join(label_parts) or exp_name
+        # 1) 如果 sampling.method 为 lhs/orthogonal，则优先使用 sampling 模块生成组合
+        sampled_variants = []
+        try:
+            sampled_variants = sampling_utils.generate_sampled_variants(
+                base_traffic, base_sim, exp_sampling
+            )
+        except NotImplementedError as e:
+            # orthogonal 目前不支持，直接报错避免“假实现”
+            raise
 
-                out_name = current_exp_results_dir / label_suffix
-                out_name.mkdir(parents=True, exist_ok=True)
-                status_file = out_name / "status.yaml"
+        if sampled_variants:
+            variants_iter = sampled_variants
+        else:
+            # 回落到原有笛卡尔积展开（cartesian 或未配置 sampling）
+            traffic_variants = expand_params_tree(base_traffic)
+            sim_variants = expand_params_tree(base_sim)
+            variants_iter = [(t_var, s_var) for t_var in traffic_variants for s_var in sim_variants]
 
-                planned_tasks.append(
-                    {
-                        "exp_name": exp_name,
-                        "exe": exe,
-                        "execute": execute,
-                        "t_var": t_var,
-                        "s_var": s_var,
-                        "label_suffix": label_suffix,
-                        "out_name": out_name,
-                        "status_file": status_file,
-                    }
-                )
+        for t_var, s_var in variants_iter:
+            # 用于 variable_keys 识别
+            all_exp_variants.append(
+                {**common_flat, **t_var, **s_var, "name": exp_name}
+            )
+
+            # 实际任务登记在后面统一使用 variable_keys 生成 label
+            planned_tasks.append(
+                {
+                    "exp_name": exp_name,
+                    "exe": exe,
+                    "execute": execute,
+                    "t_var": t_var,
+                    "s_var": s_var,
+                }
+            )
+
+    # 依据“真实要跑”的组合识别变量键
+    variable_keys = identify_variable_keys(all_exp_variants)
+
+    # 现在根据 variable_keys 补齐 planned_tasks 的输出目录等元信息
+    enriched_tasks = []
+    for task in planned_tasks:
+        exp_name = task["exp_name"]
+        t_var = task["t_var"]
+        s_var = task["s_var"]
+
+        label_parts = []
+        for key in variable_keys:
+            val = {**t_var, **s_var}.get(key)
+            if val is not None and not isinstance(val, dict):
+                clean_val = str(val).replace(" ", "_")
+                label_parts.append(f"{key}{clean_val}")
+        label_suffix = exp_name + "_".join(label_parts) or exp_name
+
+        out_name = current_exp_results_dir / label_suffix
+        out_name.mkdir(parents=True, exist_ok=True)
+        status_file = out_name / "status.yaml"
+
+        enriched = {
+            **task,
+            "label_suffix": label_suffix,
+            "out_name": out_name,
+            "status_file": status_file,
+        }
+        enriched_tasks.append(enriched)
+
+    planned_tasks = enriched_tasks
 
     total_count = len(planned_tasks)
     done = success = failed = skipped = 0
@@ -358,6 +405,7 @@ def run_experiment(
                 # effective_common = dict(common_flat)
                 # effective_common.pop("execute", None)
                 sim_params.pop("conns", None)
+                sim_params.pop("flowsize", None) # Exclude flowsize from simulation flags
                 # Extract nodes, conns from traffic
                 nodes, conns = task["t_var"]["nodes"], task["t_var"]["conns"]
 

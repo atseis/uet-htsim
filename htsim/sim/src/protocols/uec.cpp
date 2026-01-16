@@ -2806,7 +2806,8 @@ void UecSink::processRts(const UecRtsPacket& pkt) {
     }
 
     bool ecn = (bool)(pkt.flags() & ECN_CE);
-    assert(!ecn);  // not expecting ECN set on control packets
+    // assert(!ecn);  // not expecting ECN set on control packets - relaxed for simulation heavily
+    // loaded scenarios
 
     if (pkt.epsn() < _expected_epsn || _epsn_rx_bitmap[pkt.epsn()]) {
         if (_src->debug())

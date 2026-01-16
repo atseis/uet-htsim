@@ -1,0 +1,61 @@
+# 阶段 4: 验证与优化（可选）
+# 目标：验证高影响组合，优化参数（如 Pareto 前沿）
+# 维度：5-8，样本数：200
+# 注意：此阶段应基于前 3 阶段的敏感性分析结果，仅包含高敏感参数
+
+common:
+  execute: True
+  traffic:
+    type: incast
+    nodes: 432
+    flowsize: "50KB"
+    extrastarttime: 0
+    prefer_remote: 1
+    conns: 64
+    randseed: 789
+
+
+  simulation:
+    tiers: 3
+    planes: 1
+    mtu: 4150
+    switch_latency: 0
+    logtime: 0.1
+    end: 20000
+    seed: 789
+    log:
+      - flow_events
+    # 固定低敏感参数（基于前阶段结果）
+    disable_trim: false
+    sender_cc_algo: nscc
+    load_balancing_algo: mixed
+    queue_type: composite_ecn
+    strat: ecmp_host_ecn
+
+experiments:
+  - name: stage4_validation
+    exe: htsim_uec
+    protocol: uec
+
+    sampling:
+      method: lhs
+      samples: 200
+      seed: 789
+      # 仅包含前阶段识别出的高敏感参数（示例，需根据实际分析结果调整）
+      continuous: [queue_size_bdp_factor, ecn_low, ecn_high, hop_latency, linkspeed]
+      log_continuous: [flowsize]
+
+    simulation:
+      # 高敏感连续变量（精炼范围，基于前阶段结果）
+      queue_size_bdp_factor: [1.0, 4.0]       # 缩小范围聚焦最优区间 (balanced)
+      ecn_low: [0.1, 0.2]                     # 缩小范围 (aggressive marking)
+      ecn_high: [0.4, 0.6]                    # 缩小范围
+      hop_latency: [0.1, 1.0]                 # 缩小范围 (ultra-low latency)
+      linkspeed: [100000, 400000]             # 缩小范围 (High Bandwidth Focus)
+      flowsize: [100000, 5000000]             # Focus on medium-large flows for validation
+      
+      # 固定其他参数
+      cwnd: 50                                # 固定为中间值
+      mtu: 4150
+      target_q_delay: 12
+      sleek: [False, True]                    # 仍测试二元选项

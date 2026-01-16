@@ -11,25 +11,29 @@ def convert_to_bytes(size_str: str) -> int:
     """
     将带有单位的流量大小字符串转换为字节数。
     支持：
+        - 整数/浮点数：直接返回（取整）
         - 二进制单位：KiB, MiB, GiB, TiB (1024进制)
         - 十进制单位：KB, MB, GB, TB (1000进制)
         - 无单位时：视为字节
         - 大小写混合、前后空格
     示例：
+        convert_to_bytes(100)       -> 100
         convert_to_bytes("1.5GB")   -> 1500000000
-        convert_to_bytes("1.5GiB")  -> 1610612736
-        convert_to_bytes("512kb")   -> 512000
-        convert_to_bytes("512KiB")  -> 524288
     """
-    s = size_str.strip()
+    if isinstance(size_str, (int, float)):
+        return int(size_str)
+        
+    s = str(size_str).strip()
     match = re.match(r"(?i)^\s*([\d.]+)\s*([KMGT]?I?B)?\s*$", s)
     if not match:
         raise ValueError(f"无法解析大小字符串: {size_str}")
 
     value, unit = match.groups()
     value = float(value)
-    unit = (unit or "B").upper()
-
+    if not unit:
+        return int(value)
+        
+    unit = unit.upper()
     binary = unit.endswith("IB")  # 判断是否为二进制单位
     base = 1024 if binary else 1000
 

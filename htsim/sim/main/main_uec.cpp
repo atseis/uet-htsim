@@ -710,8 +710,10 @@ int main(int argc, char** argv) {
             // ecn_low = memFromPkt(ceil(bdp_pkt * 0.2));
             // ecn_high = memFromPkt(ceil(bdp_pkt * 0.8));
         } else {
-            ecn_low = memFromPkt(ecn_low);
-            ecn_high = memFromPkt(ecn_high);
+            ecn_low = ceil(ecn_low * queuesize);
+            ecn_high = ceil(ecn_high * queuesize);
+            // ecn_low = memFromPkt(ecn_low);
+            // ecn_high = memFromPkt(ecn_high);
         }
         cout << "Setting ECN to parameters low " << ecn_low << " high " << ecn_high
              << " enable on tor downlink " << !receiver_driven << endl;
