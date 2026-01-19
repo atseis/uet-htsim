@@ -36,5 +36,5 @@ experiments:
       sender_cc_algo: nscc
       target_q_delay: 12
       queue_size_bdp_factor: 8
-      ecn: [ "0.05 0.2","0.08 0.32", "0.1 0.4", "0.2 0.8" ]
+      ecn: [ "0.05 0.2","0.08 0.32","0.0806 0.3226", "0.1 0.4", "0.2 0.8" ]
       sleek: [False, True]
