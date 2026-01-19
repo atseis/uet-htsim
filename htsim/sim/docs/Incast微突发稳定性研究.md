@@ -60,7 +60,32 @@
 ### [2025-01-15] Stage 1 Baseline 启动
 *   **Run ID**: `stage1_core`
 *   **配置概览**: 150 组 LHS 采样，涵盖 Incast 场景。
-*   **预期**: ...
+### [2025-01-16] Stage 2 Sensitivity Deepening
+*   **Run ID**: `stage2_sensitivity`
+*   **关键发现 1: 物理墙 (The Physical Wall)**
+    *   **现象**: 在 800G @ 400 Conns 高压下，当 Buffer < 0.6x BDP 时，无论 ECN 如何设置，丢包率均 > 40%，且 P99 FCT 极高。
+    *   **结论**: 存在硬物理约束。小缓存无法吸收微突发，算法优化无效。
+*   **关键发现 2: UEC 的带宽-延时交换 (Trade-off)**
+    *   **现象**: 在 Buffer > 1.0x BDP 的“安全区”，最佳性能点（低 FCT）往往伴随着较高的 Trim Rate (~50%)。
+    *   **机制**: UEC 通过主动剪裁 (Trimming) 来换取低排队延迟。**高 Trim Rate 是机制生效的特征，而非故障**。
+*   **黄金配置 (Golden Config)**:
+    *   `queue_size_bdp_factor` > 1.0
+    *   `ecn_high` ≈ 0.6 - 0.8
+    *   `ecn_low` ≈ 0.2 - 0.4 (需保持 gap)
+*   **下一步**: 验证动态 ECN 是否能自动收敛到该区域。
+
+### [2025-01-16] Stage 2.5 Scalability Test (The Breaking Point?)
+*   **Run ID**: `stage2.5_scalability`
+*   **配置**:
+    *   **Baseline**: Queue=1.0 BDP (Safe Zone), ECN=0.5
+    *   **Variable**: Incast Degree (Conns) [16 -> 420]
+*   **现象 (See Plot)**:
+    *   **FCT 线性增长**: P99 FCT 随并发数呈现完美的线性上升 (0.2ms -> 4.5ms)，**没有出现指数级崩塌 (Crash)**。
+    *   **高 Trim Rate**: 即使在低并发下，Trim Rate 也维持在 30%-60% 的高位。
+*   **关键结论**:
+    1.  **没有悬崖**: 在 Queue=1.0 BDP 的黄金配置下，UEC 协议成功支撑住了直到物理极限 (420/432 nodes) 的 Incast 压力。
+    2.  **Trim = Stability**: 图中红色的高 Trim Rate 反而是系统稳定的证明。UEC 通过及其激进的丢包（裁剪），避免了长尾延迟的失控。**它把“拥塞”转化为了“重传开销”，而不是“排队延迟”。**
+    3.  **容量验证**: 400G 网络承载 500KB Incast 的物理极限是线性的，未见吞吐量黑洞。
 
 ---
 

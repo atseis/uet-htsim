@@ -1622,6 +1622,8 @@ void UecSrc::doNextEvent() {
                 cout << timeAsUs(eventlist().now()) << " doNextEvent probe " << _rtx_timeout_pending
                      << " flowid " << _flow.flow_id() << endl;
             }
+            _probe_timer_when =
+                0;  // [Fix] Reset timer timestamp so we don't try to cancel it later
             sendProbe();
         }
     }

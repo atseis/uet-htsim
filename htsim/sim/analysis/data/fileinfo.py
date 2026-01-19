@@ -32,6 +32,33 @@ class ExperimentResult:
         self.rate_unit = rate_unit
         self._validate_files()
 
+    def help(self):
+        """
+        [Interactive Guide] 显示单次实验 (ExperimentResult) 可用的属性和指标。
+        """
+        guides = [
+            # --- 核心指标 ---
+            {"Type": "Metric", "Name": "p99_fct", "Desc": "99th Percentile Flow Completion Time (us)"},
+            {"Type": "Metric", "Name": "max_fct", "Desc": "Maximum FCT observed (us)"},
+            {"Type": "Metric", "Name": "max_drop_rate", "Desc": "Peak Trim/Drop rate (from queue usage)"},
+            {"Type": "Metric", "Name": "fairness_index", "Desc": "Jain's Fairness Index for FCTs"},
+            {"Type": "Metric", "Name": "queue_stability", "Desc": "Coefficient of Variation (CV) of Queue Depth"},
+            
+            # --- 数据表 ---
+            {"Type": "DataFrame", "Name": "flow_df", "Desc": "Flow-level log: [src, dst, size, fct_ns, start_time]"},
+            {"Type": "DataFrame", "Name": "queue_df", "Desc": "Queue sampling: [time, queue_id, max_q, utilization]"},
+            {"Type": "DataFrame", "Name": "traffic_df", "Desc": "Packet-level trace (if enabled): [time, event, size]"},
+            {"Type": "DataFrame", "Name": "switch_df", "Desc": "Switch buffer metrics: [last_q, min_q, max_q]"},
+            
+            # --- 动作/工具 ---
+            {"Type": "Action", "Name": "report", "Desc": "Object: AutoVisualizer for quick plots (res.report.show())"},
+            {"Type": "Action", "Name": "export_config()", "Desc": "Generate a reproduction YAML for this specific run"},
+            {"Type": "Action", "Name": "params", "Desc": "Dict: Merged parameters (cmd args + variables)"},
+        ]
+        df = pd.DataFrame(guides)
+        pd.set_option('display.max_colwidth', None)
+        return df
+
     def _compute_metric(self, name: str):
         """
         核心计算逻辑：区分“零值”与“不可观测”。
@@ -56,12 +83,23 @@ class ExperimentResult:
                 return float(np.percentile(fct_us, 99))
             elif name == "median_fct":
                 return float(np.median(fct_us))
-            elif name == "max_slowdown":
                 return (
                     float(self.flow_slowdown_df["slowdown"].max())
                     if not self.flow_slowdown_df.empty
                     else 0
                 )
+
+        if name == "max_drop_rate":
+            # 优先使用 queue_usage (轻量级日志)
+            if not self.queue_usage_df.empty:
+                return float(self.queue_usage_df["trim_frac"].max())
+            
+            # 如果有 detailed traffic log (重量级)
+            if not self.traffic_df.empty:
+                 # CUM_TRAFFIC: cum_drop / cum_arr
+                 # 这需要重新计算，暂时通过 queue_usage 覆盖大多数情况
+                 pass
+            return 0.0
 
         # 2. RTO 相关指标 (依赖 traffic 日志)
         if name == "rto_count":

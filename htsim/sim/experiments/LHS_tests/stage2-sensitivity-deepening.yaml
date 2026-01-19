@@ -56,8 +56,8 @@ experiments:
       
       # LHS Sampled Control Variables
       queue_size_bdp_factor: [0.1, 2.0]      # Focus on SMALL buffers (0.1 to 2.0 BDP)
-      ecn_low: [0.05, 0.2]                   # Aggressive ECN
-      ecn_high: [0.2, 0.5]
+      ecn_low:  [0.0, 1.0]                 # Aggressive ECN
+      ecn_high: [0.0, 1.0]
       cwnd: [50, 500]                        # Larger windows
       flowsize: [50000, 500000]              # Mid-sized chunks (50KB-500KB)
       

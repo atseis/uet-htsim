@@ -1,0 +1,55 @@
+# 阶段 2.5: 可扩展性压力测试 (The Breaking Point)
+# 目标：固定“黄金配置”，扫描 Incast 并发度，寻找系统崩溃拐点
+# 维度：1 (Conns), 样本数：笛卡尔积扫描
+
+common:
+  execute: True
+  traffic:
+    type: incast
+    nodes: 432
+    flowsize: "500KB"         # 固定为中等流大小，既要有压力又要能跑完
+    extrastarttime: 0
+    prefer_remote: 1
+    # conns: 由 experiment 覆盖
+    randseed: 2024
+    
+  simulation:
+    tiers: 3
+    planes: 1
+    mtu: 4150
+    switch_latency: 0
+    logtime: 0.1
+    end: 5000000             # 稍微跑久一点，确保大并发能完成
+    seed: 2024
+    log:
+      - flow_events          # 必须：看 FCT
+      - queue_usage          # 必须：看 Drop Rate
+    # 固定参数
+    disable_trim: false
+    sender_cc_algo: nscc
+    load_balancing_algo: mixed
+
+experiments:
+  - name: stage2.5_scalability
+    exe: htsim_uec
+    protocol: uec
+
+    # sampling:
+    #   method: grid           # 默认行为即为 Grid (列表笛卡尔积)，无需显式配置 sampling
+
+      
+    simulation:
+      # 压力变量 (X轴) - 由 traffic.conns 驱动，此处不需要重复定义 
+      
+      # 固定为“黄金配置” (Based on Stage 2 Findings)
+      queue_size_bdp_factor: [1.0]   # 能够承受 Stage 1，位于 Stage 2 边缘
+      ecn_low: [0.2]
+      ecn_high: [0.5]                # 激进但不过分的剪裁
+      cwnd: [50]                     # 适中的初始窗口
+      hop_latency: [1.0]
+      linkspeed: [400000]            # 400Gbps 标准
+      flowsize: [500000]             # 对应 common 中的 500KB
+
+    # 特殊处理：使用 experiments 里的 traffic 覆盖 common
+    traffic:
+        conns: [16, 32, 64, 96, 128, 192, 256, 320, 384, 420]

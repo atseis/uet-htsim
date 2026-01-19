@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
     bool ecn = true;
     uint32_t ecn_low = 0;
     uint32_t ecn_high = 0;
-    uint32_t queue_size_bdp_factor = 0;
+    double queue_size_bdp_factor = 0;
     uint32_t topo_num_failed = 0;
 
     bool receiver_driven = false;
@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
             cout << "target_q_delay" << atof(argv[i + 1]) << " us" << endl;
             i++;
         } else if (!strcmp(argv[i], "-queue_size_bdp_factor")) {
-            queue_size_bdp_factor = atoi(argv[i + 1]);
+            queue_size_bdp_factor = atof(argv[i + 1]);
             cout << "Setting queue size to " << queue_size_bdp_factor << "x BDP." << endl;
             i++;
         } else if (!strcmp(argv[i], "-sender_cc_algo")) {
@@ -710,10 +710,10 @@ int main(int argc, char** argv) {
             // ecn_low = memFromPkt(ceil(bdp_pkt * 0.2));
             // ecn_high = memFromPkt(ceil(bdp_pkt * 0.8));
         } else {
-            ecn_low = ceil(ecn_low * queuesize);
-            ecn_high = ceil(ecn_high * queuesize);
-            // ecn_low = memFromPkt(ecn_low);
-            // ecn_high = memFromPkt(ecn_high);
+            // ecn_low = ceil(ecn_low * queuesize);
+            // ecn_high = ceil(ecn_high * queuesize);
+            ecn_low = memFromPkt(ecn_low);
+            ecn_high = memFromPkt(ecn_high);
         }
         cout << "Setting ECN to parameters low " << ecn_low << " high " << ecn_high
              << " enable on tor downlink " << !receiver_driven << endl;

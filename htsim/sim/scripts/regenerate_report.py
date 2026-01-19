@@ -70,7 +70,7 @@ cells = [
         "metadata": {},
         "source": [
             "# 基础数据预览\n",
-            "metrics = [\"p99_fct\", \"max_fct\", \"median_fct\", \"drop_count\", \"util_avg\"]\n",
+            "metrics = [\"p99_fct\", \"max_fct\", \"median_fct\", \"max_drop_rate\", \"util_avg\"]\n",
             "df = batch.get_summary_df(metrics)\n",
             "print(f\"数据维度 (Data Shape): {df.shape}\")\n",
             "df.head()"
@@ -127,7 +127,7 @@ cells = [
             "varying_params = batch.get_varying_params()\n",
             "print(f\"检测到变化参数: {varying_params}\")\n",
             "\n",
-            "batch.viz.plot_main_effects(varying_params, [\"p99_fct\", \"drop_count\"])"
+            "batch.viz.plot_main_effects(varying_params, [\"p99_fct\", \"max_drop_rate\"])"
         ]
     },
     {
@@ -156,6 +156,50 @@ cells = [
             "> **💡 交互图解读**:\n",
             "> *   **ECN Interaction**: 观察是否只有在 High/Low 阈值保持特定比例时，性能才好？（寻找“绿色孤岛”）\n",
             "> *   **BDP Impact**: 带宽和延迟是否呈现互补关系？"
+        ]
+    },
+    {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [
+            "### 3.2.1 物理边界探测 (Crash Zone Detection)\n",
+            "本节专门用于识别**物理墙 (Physical Wall)**：即无论算法如何优化，硬件（如 Buffer）都无法支撑的区域。\n",
+            "如果看到大面积的黄色/深色区域（低性能/高丢包），说明该配置处于“死亡地带”。"
+        ]
+    },
+    {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "source": [
+            "# 自动探测：Buffer vs ECN 的红蓝对抗\n",
+            "if \"queue_size_bdp_factor\" in batch.get_varying_params() and \"ecn_high\" in batch.get_varying_params():\n",
+            "    # 1. 过滤掉低压力场景，只看高压下的表现 (Conns > median)\n",
+            "    med_conns = batch.get_summary_df([])['conns'].median()\n",
+            "    print(f\"[Crash Zone] Focusing on High Load: conns >= {med_conns}\")\n",
+            "    subset = batch.filter(lambda r, t: r.params.get('conns', 0) >= med_conns)\n",
+            "    \n",
+            "    # 2. 绘制 FCT 热力图\n",
+            "    subset.viz.plot_generic(\n",
+            "        x='queue_size_bdp_factor', \n",
+            "        y='ecn_high', \n",
+            "        hue='p99_fct', \n",
+            "        metrics=['p99_fct'],\n",
+            "        kind='scatter', \n",
+            "        title=\"1. Latency Crash Zone (High Load)\", \n",
+            "        marker='o', s=100, palette='viridis_r'\n",
+            "    )\n",
+            "\n",
+            "    # 3. 绘制 Drop Rate 热力图 (验证物理丢包)\n",
+            "    subset.viz.plot_generic(\n",
+            "        x='queue_size_bdp_factor', \n",
+            "        y='ecn_high', \n",
+            "        hue='max_drop_rate', \n",
+            "        metrics=['max_drop_rate'],\n",
+            "        kind='scatter', \n",
+            "        title=\"2. Packet Loss Zone (High Load)\", \n",
+            "        marker='o', s=100, palette='magma'\n",
+            "    )"
         ]
     },
     {

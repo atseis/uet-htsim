@@ -21,6 +21,7 @@ common:
     seed: 456
     log:
       - flow_events
+      - queue_usage
     # 固定参数（基于前阶段结果）
     disable_trim: false
     sender_cc_algo: nscc
@@ -34,28 +35,26 @@ experiments:
       method: lhs
       samples: 300
       seed: 456
-      continuous: [queue_size_bdp_factor, ecn_low, ecn_high, cwnd, hop_latency, linkspeed, mtu, target_q_delay, failed, paths]
-      log_continuous: [flowsize]
+      continuous: [queue_size_bdp_factor, ecn_low, ecn_high, cwnd, hop_latency, target_q_delay, failed, paths]
 
     simulation:
-      # 核心连续变量（继承前阶段）
+      # 2. 算法参数（LHS 采样 - 核心变量）
       queue_size_bdp_factor: [0.5, 5.0]
       ecn_low: [0.1, 0.3]
       ecn_high: [0.4, 0.8]
       cwnd: [10, 200]
       hop_latency: [0.1, 2.0]
-      linkspeed: [25000, 400000]
-      flowsize: [10000, 5000000]
-      mtu: [1500, 9000]
       target_q_delay: [1.0, 10.0]
+      
+      # 1. 物理环境（固定 - 条件切片）
+      linkspeed: 400000                        # Fixed: 400Gbps
+      flowsize: 1000000                        # Fixed: 1MB
+      mtu: 4150                                # Fixed: Standard ROCE MTU
       
       # 新增连续变量（整数）
       failed: [0, 5]                            # 失败链接数（整数）
       paths: [16, 128]                          # 路径熵大小（整数）
       
-      # 离散变量（拓扑相关）
-      tiers: [2, 3]                            # 层数
-      planes: [1, 2, 4]                        # 平面数/端口数
       
       # 固定离散变量（基于前阶段结果）
       queue_type: composite_ecn

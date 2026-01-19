@@ -29,3 +29,7 @@ experiments:
       conns: [16, 32,64, 96, 128]  
     simulation:
       queue_type: composite
+      sender_cc_algo: nscc
+      target_q_delay: 12
+      queue_size_bdp_factor: 8
+      sleek: [False, True]

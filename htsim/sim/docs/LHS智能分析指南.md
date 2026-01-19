@@ -39,8 +39,45 @@
 *   **功能**: 自动扫描整个数据集，输出表现最好和最差的配置参数表。
 *   **用途**: 直接获取可执行的“金标配置” (Golden Config)。
 
-## 3. 使用工作流
+### 2.5 危机探测 (Crash Zone Detection)
+*   **原理**: “物理墙”理论。通过锁定高负载场景（Filter），绘制 Buffer vs ECN 的 2D 热力图。
+*   **用途**: 识别无论算法如何优化都无法逾越的物理边界（如 Buffer 因容量不足导致的必丢包区域）。
+*   **图谱特征**:
+    *   **Latency Zone**: 左下角（小 Buffer）呈现深色高延时。
+    *   **Drop Zone**: 对应区域呈现亮色高丢包。
+
+## 3. 进阶：分层分析策略 (Tiered Analysis Strategy)
+
+为了应对不同阶段的研究需求，建议采用**漏斗式分析法**，从宏观到微观逐步推进：
+
+### Phase 1: 广域侦察 (Discovery)
+*   **目标**: 在茫茫参数海中寻找“什么因素最重要”以及“哪里是危险区”。
+*   **工具**: `LHS_Analysis.ipynb` (通用扫描器)
+*   **核心动作**: Feature Importance, Heatmap, Best/Worst Config。
+*   **适用场景**: `Stage 1` (探索), `Stage 3` (边缘测试)。
+
+### Phase 2: 定向攻坚 (Validation)
+*   **目标**: 针对特定的假设进行验证（例如：“系统能否扛住 400 并发？”）。
+*   **工具**: `Targeted_Analysis.ipynb` (专用靶向分析) 或 Python 脚本。
+*   **核心动作**:
+    *   **Scaling Test**: 如果 X 轴是压力 (Conns/Load)，使用 `batch.viz.plot_tradeoff()` 绘制双轴图。
+    *   **Param Sweep**: 如果 X 轴是算法参数 (Kmin/Pmax)，使用 `batch.viz.plot_pivot()` 观察单变量影响。
+*   **适用场景**: `Stage 2` (深度), `Stage 2.5` (扩展性)。
+
+### Phase 3: 机理溯源 (Diagnosis)
+*   **目标**: 解释 Phase 2 中看到的异常现象（例如：“为什么 200 并发时丢包率突然上升？”）。
+*   **工具**: 原始日志分析 (Raw Log Inspector)。
+*   **核心动作**:
+    *   检查 `queue_usage` 时序图：看缓存是否被打爆。
+    *   检查 `flow_events` 具体流行为：看是否有流饿死。
+
+---
+
+## 4. 使用工作流
 
 1.  **运行实验**: 使用 `LHS_tests/*.yaml` 跑完批量实验。
-2.  **一键报告**: 打开 `LHS_Analysis.ipynb`，重启 Kernel 并运行所有单元格。
+2.  **选择武器**:
+    *   **不知道找什么规律** -> 打开 `LHS_Analysis.ipynb`。
+    *   **验证特定假设** -> 打开 `Targeted_Analysis.ipynb`。
 3.  **阅读建议**: 关注 Notebook 输出中的 **[Insight]** 和 **[Action]** 提示段落。
+

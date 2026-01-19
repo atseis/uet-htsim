@@ -12,6 +12,7 @@ from ..plot import (
     plot_max_fct_vs_msgsize,
     plot_max_cct_vs_algorithm,
 )  # 导入 FCT 绘图函数与 Avg FCT vs Nodes 绘图函数
+from ..utils.calculator import NetworkCalculator # [New] Import Calculator for ECN conversion
 
 # === 新增 rich 进度条支持 ===
 from rich.progress import (
@@ -96,20 +97,86 @@ def expand_params_tree(params: Dict[str, Any]) -> List[Dict[str, Any]]:
 def build_flags(params: Dict[str, Any]) -> List[str]:
     """将字典转换为命令行参数列表 [-k v ...]"""
     flags: List[str] = []
+    
+    # [Start] ECN Intelligent Parsing Logic
+    # 1. Initialize Calculator if network params are present
+    calc = None
+    if "linkspeed" in params:
+        try:
+            calc = NetworkCalculator.from_simulation_params(params)
+        except Exception:
+            pass # Fallback if params missing
+            
+    # Helper to resolve single value to packets
+    def resolve_val(val):
+        if calc is None: return val # No calculator, pass through (risky if string)
+        
+        # If string "30KB", "20%" etc.
+        if isinstance(val, str):
+            val_lower = val.lower()
+            if "kb" in val_lower or "mb" in val_lower:
+                unit_str = val_lower.replace("kb", "").replace("mb", "") # naive check
+                val_num = float(unit_str)
+                # re-delegate to calculator with specific unit
+                # but calculator expects strict unit logic.
+                # Let's simplify: pass to calculator.convert_ecn
+                if "kb" in val_lower:
+                    res = calc.convert_ecn(float(val_lower.split("kb")[0]), "kb")
+                    return res["Packets"]
+            if "p" in val_lower and "%" not in val_lower: # "20p"
+                return int(val_lower.replace("p", ""))
+            if "%" in val_lower:
+                num = float(val_lower.replace("%", ""))
+                res = calc.convert_ecn(num, "ratio_queue") # User said "ratio = % of queuesize"
+                return res["Packets"]
+            
+            # [Fix] Handle pure numeric strings (e.g. "0.08")
+            try:
+                f_val = float(val)
+                if 0 < f_val < 1.0:
+                    res = calc.convert_ecn(f_val, "ratio_queue")
+                    return res["Packets"]
+                else:
+                    return int(f_val)
+            except ValueError:
+                pass
+        
+        # If float/int
+        if isinstance(val, (int, float)):
+            if 0 < val < 1.0:
+                # User request: "0.2 表示是 queuesize 的 0.2 倍"
+                res = calc.convert_ecn(val, "ratio_queue") 
+                return res["Packets"]
+            else:
+                return int(val) # Packets
+        
+        return val # Fallback
+
+    # [End] Helper defined
+    
     for k, v in params.items():
         if v is None or (isinstance(v, str) and v.lower() == "none"):
             continue
-        # 特殊处理多参数选项 ecn: "low high" 或 ecn: ["4 20", "10 40", ...]
-        # 也支持 ecn_low/ecn_high 分别采样后合成
+        
+        # Special handling for ecn parameter
         if k == "ecn":
+            low, high = 0, 0
             if isinstance(v, str):
                 parts = v.split()
                 if len(parts) == 2:
-                    flags.extend(["-ecn", parts[0], parts[1]])
+                    low = resolve_val(parts[0])
+                    high = resolve_val(parts[1])
+                    flags.extend(["-ecn", str(low), str(high)])
+            elif isinstance(v, list) and len(v) == 2:
+                 low = resolve_val(v[0])
+                 high = resolve_val(v[1])
+                 flags.extend(["-ecn", str(low), str(high)])
             continue
-        # 跳过 ecn_low/ecn_high，它们会在后面统一处理
+            
+        # Skip consolidated ecn_low/high (handled later)
         if k in ("ecn_low", "ecn_high"):
             continue
+            
         if isinstance(v, bool):
             if v:
                 flags.append(f"-{k}")  # 仅在 True 时添加“开关型参数”
@@ -122,11 +189,13 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
             continue
         flags.extend([f"-{k}", str(v)])
     
-    # 处理 ecn_low/ecn_high 合成 -ecn（如果存在）
-    ecn_low = params.get("ecn_low")
-    ecn_high = params.get("ecn_high")
-    if ecn_low is not None and ecn_high is not None:
-        flags.extend(["-ecn", str(ecn_low), str(ecn_high)])
+    # Consolidate ecn_low / ecn_high if they exist separately
+    e_low = params.get("ecn_low")
+    e_high = params.get("ecn_high")
+    if e_low is not None and e_high is not None:
+        l_val = resolve_val(e_low)
+        h_val = resolve_val(e_high)
+        flags.extend(["-ecn", str(l_val), str(h_val)])
     
     return flags
 

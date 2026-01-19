@@ -24,7 +24,7 @@ common:
     seed: 13
     log:
       - flow_events
-      - sink
+      - queue_usage
     # 固定参数
     disable_trim: false
     sender_cc_algo: nscc
@@ -45,11 +45,11 @@ experiments:
     simulation:
       # 核心连续变量（LHS 采样）
       queue_size_bdp_factor: [0.5, 5.0]      # 相对 BDP 的队列大小因子 (LLM: 浅缓冲)
-      ecn_low: [0.1, 0.3]                      # ECN 低阈值（相对 queuesize 比例）
-      ecn_high: [0.4, 0.8]                     # ECN 高阈值（相对 queuesize 比例）
+      ecn_low: [0.0, 1.0]                      # ECN 低阈值（相对 queuesize 比例）
+      ecn_high: [0.0, 1.0]                     # ECN 高阈值（相对 queuesize 比例）
       cwnd: [10, 200]                          # 初始拥塞窗口 (LLM: 覆盖大流量与突发)
       hop_latency: [0.1, 2.0]                  # 每跳延迟 (us) (LLM: 低延迟)
-      linkspeed: [25000, 400000]               # 链路速度 (Mbps, 25-400Gbps)
+      linkspeed: [400000,800000 ]               # 链路速度 (Mbps, 25-400Gbps)
       flowsize: [10000, 5000000]               # 流大小 (Bytes, 10KB-5MB) 适配 LLM 推理场景 (Activations/Gradients)
       
       # 离散变量（与 LHS 做笛卡尔积）
