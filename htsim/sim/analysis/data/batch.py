@@ -161,25 +161,54 @@ class BatchResult:
         res.columns = [f"{m}_{s}" for m in metrics for s in ["avg", "std", "max"]]
         return res.reset_index()
 
-    def find_by_params(self, **params) -> List[ExperimentResult]:
+    def get_experiment(self, index: int = 0, **params) -> Optional[ExperimentResult]:
         """
-        [新增] 解决 KeyError 工具函数。
-        根据参数组合（如 randseed=4, version='baseline'）快速查找 ExperimentResult 对象。
-        用法: res = batch.find_by_params(randseed=4, version='baseline')[0]
+        [Convenience] 获取单个实验结果对象。
+        :param index: 如果匹配到多个，返回第 index 个 (默认 0)
+        :param params: 筛选条件 (如 randseed=4)
         """
-        # 获取包含元数据的 summary 表
-        # 这里默认带上常见的 metrics 以便内部筛选，实际上只需要 _uid
-        df = self.get_summary_df([])
+        # 使用 filter 进行筛选
+        subset = self.filter(**params)
+        results = [entry["result"] for entry in subset.experiments.values()]
+        
+        if not results:
+            print(f"[!] No experiment found matching {params}")
+            return None
+        if index >= len(results):
+            print(f"[!] Index {index} out of range (found {len(results)})")
+            return None
+        return results[index]
 
-        for k, v in params.items():
-            if k in df.columns:
-                df = df[df[k] == v]
+    def get_best_experiment(self, metric: str = "p99_fct", maximize: bool = False) -> Optional[ExperimentResult]:
+        """
+        [Convenience] 获取在该指标上表现最好的实验。
+        :param maximize: False (默认) 意味着越小越好 (如 latency)。True 意味着越大越好 (如 goodput)。
+        """
+        df = self.get_summary_df([metric])
+        if df.empty: return None
+        
+        # Best = Head if ascending=True (Low is Good)
+        # Best = Head if ascending=False (High is Good)
+        # So we just sort and take head(1) based on maximize direction
+        sorted_df = df.sort_values(metric, ascending=not maximize)
+        if sorted_df.empty: return None
+        
+        best_uid = sorted_df.iloc[0]["_uid"]
+        return self.experiments.get(best_uid, {}).get("result")
 
-        results = []
-        for uid in df["_uid"].tolist():
-            if uid in self.experiments:
-                results.append(self.experiments[uid]["result"])
-        return results
+    def get_worst_experiment(self, metric: str = "p99_fct", maximize: bool = False) -> Optional[ExperimentResult]:
+        """
+        [Convenience] 获取在该指标上表现最差的实验 (通常用于故障根因分析)。
+        """
+        df = self.get_summary_df([metric])
+        if df.empty: return None
+        
+        # Worst = Tail if Best is Head
+        sorted_df = df.sort_values(metric, ascending=not maximize)
+        if sorted_df.empty: return None
+        
+        worst_uid = sorted_df.iloc[-1]["_uid"]
+        return self.experiments.get(worst_uid, {}).get("result")
 
     def export_to_parquet(self, filename: str = "batch_summary.parquet"):
         """将汇总大表存为 Parquet 格式，供外部绘图工具（如 Origin 或 R）使用"""
@@ -286,66 +315,66 @@ class BatchResult:
             return True
         return False
 
-    def help(self):
+    def help(self) -> Union[pd.DataFrame, "pd.io.formats.style.Styler"]:
         """
-        [Interactive Guide] 显示 BatchResult 的核心功能菜单。
-        返回一个 DataFrame，列出常用分析目标及其对应的代码示例。
+        [Interactive Guide] 显示 BatchResult 的标准工作流指南。
         """
         guides = [
             {
-                "Goal": "📈 算法对比 (FCT, Drops)",
-                "Method": "batch.viz.plot_statistical_summary",
-                "Usage": "batch.viz.plot_statistical_summary(x='conns', hue='cc_alg', metrics=['p99_fct', 'max_drop_rate'])",
-                "Context": "比较不同 CC 在不同负载下的表现 (Max/P99/Median)"
+                "Phase": "1. 🚛 加载数据 (Load)",
+                "Action": "添加实验源",
+                "Method": "batch.add_source(path, tags={...})",
+                "Usage": "batch.add_source('experiments/test.yaml', tags={'version': 'v1'})",
+                "Tip": "支持 YAML 文件、结果目录或 glob 路径列表"
             },
             {
-                "Goal": "⚖️ 权衡分析 (Latency vs Loss)",
-                "Method": "batch.viz.plot_tradeoff",
-                "Usage": "batch.viz.plot_tradeoff(x='incast_degree', y1='p99_fct', y2='max_drop_rate')",
-                "Context": "双轴图，寻找系统的 Crash Point (拐点)"
+                "Phase": "2. 🔍 筛选 (Filter)",
+                "Action": "高级筛选 (支持 Lambda)",
+                "Method": "batch.filter(col=val, col=lambda x...)",
+                "Usage": "subset = batch.filter(conns=[64, 128], linkspeed=lambda x: x > 400000000)",
+                "Tip": "返回 BatchResult 子集，支持链式调用: batch.filter(...).suggest()"
             },
             {
-                "Goal": "🔍 参数敏感性 (Parameter Sweep)",
-                "Method": "batch.viz.plot_pivot",
-                "Usage": "batch.viz.plot_pivot(x='ecn_threshold', y='p99_fct', hue='buffer_size')",
-                "Context": "透视表风格，分析多参数对结果的影响"
+                "Phase": "3. 🤖 智能分析 (Auto)",
+                "Action": "获取分析建议",
+                "Method": "batch.suggest()",
+                "Usage": "batch.suggest()",
+                "Tip": "自动检测 LHS/对比/单变量场景，生成可执行代码"
             },
             {
-                "Goal": "📊 因子主效应 (Main Effects)",
-                "Method": "batch.viz.plot_main_effects",
-                "Usage": "batch.viz.plot_main_effects(factors=['ecn', 'buffer'], metric=['p99_fct', 'utilization'])",
-                "Context": "DoE 分析，量化每个因子对系统的独立影响"
+                "Phase": "4. ⛏️ 深度下钻 (Deep Dive)",
+                "Action": "获取极值实验",
+                "Method": "batch.get_worst_experiment()",
+                "Usage": "exp = batch.get_worst_experiment(metric='p99_fct')",
+                "Tip": "快速定位表现最差的实验 (Crash Case) 进行根因分析"
             },
             {
-                "Goal": "📉 尾延迟分布 (CDF)",
-                "Method": "batch.viz.plot_fct_cdf_overlap",
-                "Usage": "batch.viz.plot_fct_cdf_overlap(hue='cc_alg')",
-                "Context": "叠加所有实验的流 FCT 分布，展示长尾优化效果"
-            },
-            {
-                "Goal": "🔬 单点下钻 (Drill Down)",
-                "Method": "batch.viz.drill_down",
-                "Usage": "batch.viz.drill_down(randseed=42, conns=64)",
-                "Context": "定位特定实验并生成详细 HTML 报告"
-            },
-            {
-                "Goal": "📑 导出数据 (Export)",
-                "Method": "batch.get_summary_df",
-                "Usage": "df = batch.get_summary_df(metrics=['p99_fct', 'goodput'])",
-                "Context": "获取全量汇总表进行自定义分析"
+                "Phase": "5. 📑 导出复现 (Reproduce)",
+                "Action": "生成复现配置",
+                "Method": "exp.export_config()",
+                "Usage": "path = exp.export_config()",
+                "Tip": "生成用于复现的 YAML 文件 (包含原的所有参数)"
             }
         ]
         
         df = pd.DataFrame(guides)
-        # 设置显示宽度以避免截断
-        pd.set_option('display.max_colwidth', None)
-        return df
+        
+        # 尝试使用 Styler 优化显示 (需 jinja2)，否则回退到普通 DataFrame
+        try:
+            return df.style.set_properties(**{
+                'text-align': 'left',
+                'white-space': 'pre-wrap',
+                'font-family': 'monospace'
+            }).hide(axis="index")
+        except AttributeError:
+             pd.set_option('display.max_colwidth', None)
+             return df
 
-    def suggest(self) -> pd.DataFrame:
+    def suggest(self) -> Union[pd.DataFrame, "pd.io.formats.style.Styler"]:
         """
         [Smart Assistant] 智能分析建议。
         扫描当前实验数据的维度（变化参数），根据因子数量推荐最合适的绘图与分析方法。
-        直接返回包含可执行代码的 DataFrame，复制即可运行。
+        直接返回包含可执行代码的 DataFrame (Styler)，复制即可运行。
         """
         # 1. 扫描变量因子及其基数 (Cardinality)
         factors = self.get_varying_params()
@@ -421,12 +450,23 @@ class BatchResult:
                 "Recommended Action": "绘制趋势图 + SLO 参考线",
                 "Code": f"batch.viz.plot_pivot(x='{f}', y='{primary_metric}', kind='line', ref_line=500)"
             })
-            suggestions.append({
-                "Scenario": "📊 综合性能画像 (Multi-Metric)",
-                "Detected Factors": f"1 个因子 [{f}]",
-                "Recommended Action": "多指标透视 (P99 & Max)",
-                "Code": f"batch.viz.plot_pivot(x='{f}', y={fct_group_str}, title='Performance Overview')"
-            })
+            
+            # [Optimization] 如果有 FCT 指标，使用专业的 statistical summary (Hue=None)
+            if metrics_groups["FCT"]:
+                suggestions.append({
+                    "Scenario": "📊 综合性能画像 (Scientific)",
+                    "Detected Factors": f"1 个因子 [{f}] + FCT Metrics",
+                    "Recommended Action": "多指标统计趋势图 (P99/Median/Max)",
+                    "Code": f"batch.viz.plot_statistical_summary(x='{f}', metrics={fct_group_str}, hue=None, title='{f} Impact on FCT')"
+                })
+            else:
+                # Fallback for non-FCT metrics
+                suggestions.append({
+                    "Scenario": "📊 综合性能画像 (Generic)",
+                    "Detected Factors": f"1 个因子 [{f}]",
+                    "Recommended Action": "多指标透视",
+                    "Code": f"batch.viz.plot_pivot(x='{f}', y={fct_group_str}, title='Performance Overview')"
+                })
             if drop_metric:
                 suggestions.append({
                     "Scenario": "⚖️ 权衡分析 (Dual Axis)",
@@ -454,6 +494,15 @@ class BatchResult:
                 "Recommended Action": "绘制热力图 (Phase Space)",
                 "Code": f"batch.viz.plot_pivot(x='{f1}', hue='{f2}', y='{primary_metric}', kind='heatmap')"
             })
+
+            # [Optimization] 科研级多指标对比 (X vs Hue)
+            if metrics_groups["FCT"]:
+                 suggestions.append({
+                    "Scenario": "📊 综合趋势对比 (Scientific)",
+                    "Detected Factors": f"X=[{f1}], Hue=[{f2}]",
+                    "Recommended Action": "多指标统计趋势图 (P99/Median/Max)",
+                    "Code": f"batch.viz.plot_statistical_summary(x='{f1}', hue='{f2}', metrics={fct_group_str}, title='{f1} vs {f2} (FCT Stats)')"
+                })
             
             if cat_factor:
                  suggestions.append({
@@ -476,24 +525,51 @@ class BatchResult:
             # 只有当 FCT 指标可用时才建议使用 FCT
             target_metric_list = fct_group_str if metrics_groups["FCT"] else f"['{primary_metric}']"
             
+            # A. 优先推荐：平行坐标图 (hue 增强)
             suggestions.append({
                 "Scenario": "🕸️ 高维空间总览",
                 "Detected Factors": f"{len(factors)} 个因子 (高维)",
                 "Recommended Action": "平行坐标图 (Parallel Coordinates)",
-                "Code": f"batch.viz.plot_parallel_coordinates(metrics={target_metric_list}, factors={factors})"
+                "Code": f"batch.viz.plot_parallel_coordinates(metrics={target_metric_list}, factors={factors}, hue='{factors[-1] if len(factors)>0 else None}')"
             })
+            
+            # B. 关键特征识别
             suggestions.append({
                 "Scenario": "🌲 关键特征识别",
                 "Detected Factors": "LHS/随机采样",
                 "Recommended Action": "随机森林特征重要性排序",
                 "Code": f"batch.viz.analyze_feature_importance('{primary_metric}')"
             })
-            suggestions.append({
-                "Scenario": "🏔️ 响应曲面分析 (Top 2 Factors)",
-                "Detected Factors": "复杂非线性关系",
-                "Recommended Action": "绘制响应曲面 (Response Surface)",
-                "Code": f"batch.viz.plot_response_surface(x='{factors[0]}', y='{factors[1]}', z='{primary_metric}')"
-            })
+
+            # C. 响应曲面分析 (Top 2 Factors) - 仅当 Top 2 为数值时建议
+            f1, f2 = factors[0], factors[1]
+            if pd.api.types.is_numeric_dtype(sample_df[f1]) and pd.api.types.is_numeric_dtype(sample_df[f2]):
+                 suggestions.append({
+                    "Scenario": "🏔️ 响应曲面分析 (Top 2 Factors)",
+                    "Detected Factors": "复杂非线性关系 (数值型)",
+                    "Recommended Action": "绘制响应曲面 (Response Surface)",
+                    "Code": f"batch.viz.plot_response_surface(x='{f1}', y='{f2}', z='{primary_metric}')"
+                })
+            
+            # D. [新增] 分面统计分析 (针对 ECN 等分类变量)
+            # 如果存在至少3个变量，且其中有适合做 col 的 (cardinality < 10)
+            facet_col = None
+            for f in factors:
+                if factor_counts.get(f, 100) < 10:
+                    facet_col = f
+                    break
+            
+            if facet_col:
+                # 剩余变量选一个做 x
+                remain_factors = [x for x in factors if x != facet_col]
+                x_axis = remain_factors[0] if remain_factors else "randseed"
+                
+                suggestions.append({
+                    "Scenario": "🧩 多维分面分析 (Expert)",
+                    "Detected Factors": f"含分类变量 [{facet_col}]",
+                    "Recommended Action": "分面统计摘要 (Facet Grid)",
+                    "Code": f"batch.viz.plot_facet(func=batch.viz.plot_statistical_summary, col='{facet_col}', x='{x_axis}', metrics={target_metric_list})"
+                })
 
         # 通用诊断
         suggestions.append({
@@ -530,8 +606,18 @@ class BatchResult:
         })
 
         df = pd.DataFrame(suggestions)
-        pd.set_option('display.max_colwidth', None)
-        return df
+        
+        # 使用 Styler 使得换行符 \n 能够被正确渲染 (Jupyter Lab/Notebook)
+        # 如果缺少 jinja2，Pandas 会抛出 AttributeError
+        try:
+            return df.style.set_properties(**{
+                'text-align': 'left',
+                'white-space': 'pre-wrap',
+                'font-family': 'monospace'
+            }).hide(axis="index")
+        except AttributeError:
+            # Fallback for environments without jinja2
+            return df
 
     def diagnose_failure_modes(self) -> pd.DataFrame:
         """
@@ -1023,21 +1109,46 @@ class BatchVisualizer:
         hue: str = "version",
         metrics: Optional[List[str]] = None,
         title: str = "Scalability Analysis: FCT Statistics",
+        **kwargs
     ):
         """
         [新增] 科研级多指标对比图。
-        维度 1 (颜色 Hue): 对应算法/配置 (如 baseline vs sleek)
-        维度 2 (线型 Style): 对应统计指标 (默认 Max, P99, Median)
+        支持作为独立函数调用，也支持被 plot_facet 调用 (作为 map_dataframe 的 func)。
         """
         import matplotlib.ticker as ticker
-
-        # 1. 自动提取核心 FCT 指标
+        
+        # [Compatibility Fix] Handle FacetGrid injections
+        # FacetGrid passes 'color', 'label' etc. We ignore them or use them if needed.
+        # But crucially, it passes 'data' (the sliced dataframe for this facet).
+        data = kwargs.get("data", None)
+        
+        # 1. 获取数据
         target_metrics = metrics or ["max_fct", "p99_fct", "median_fct"]
-        df = self.batch.get_summary_df(target_metrics)
+        
+        if data is None:
+            # 独立调用模式：自己去取全量数据
+            df = self.batch.get_summary_df(target_metrics)
+        else:
+            # FacetGrid 模式：使用已经切分好的数据 (注意：这个 data 可能已经包含了 columns)
+            # 但 FacetGrid 传进来的 data 可能不缺列，因为我们之前的 plot_facet 
+            # 是用 get_summary_df(all_needed) 初始化的。
+            df = data
+            
         if df.empty:
             return
 
-        # 2. 数据长表化 (Melt)：将多列指标转为一列 'Metric' 和一列 'Value'
+        # 2. 数据长表化 (Melt)
+        # 检查 target_metrics 是否都在 df 中
+        missing = [m for m in target_metrics if m not in df.columns]
+        if missing and data is not None:
+             # 如果是 Facet 模式且缺列，说明 plot_facet 初始化时没把指标加进去
+             # 尝试补救 (不建议，因为 FacetGrid 的 data 是 disconnected 的)
+             # 所以只好 filter out missing
+             target_metrics = [m for m in target_metrics if m in df.columns]
+        
+        if not target_metrics:
+             return
+
         id_vars = [c for c in df.columns if c not in target_metrics]
         df_long = df.melt(
             id_vars=id_vars,
@@ -1048,68 +1159,75 @@ class BatchVisualizer:
 
         # 3. 映射美化名称
         name_map = {"max_fct": "Max", "p99_fct": "P99", "median_fct": "Median"}
-        df_long["Metric"] = df_long["Metric"].map(name_map)
+        df_long["Metric"] = df_long["Metric"].map(name_map).fillna(df_long["Metric"])
 
-        # --- 【关键修正 A】: 执行物理逻辑排序 ---
-        # 理由：磁盘 glob 加载是无序的。我们需要提取 ecn 字符串（如 "4 20"）中的第一个数字进行排序。
+        # --- 执行物理逻辑排序 ---
         def get_sort_key(val):
             try:
-                # 尝试取第一个空格前的数字，如果是纯数字则直接转换
                 return float(str(val).split()[0])
             except (ValueError, AttributeError, IndexError):
                 return 0.0
 
-        df_long["_sort_order"] = df_long[x].apply(get_sort_key)
-        df_long = df_long.sort_values("_sort_order").drop(columns=["_sort_order"])
-        # ----------------------------------------
+        if x in df_long.columns:
+            df_long["_sort_order"] = df_long[x].apply(get_sort_key)
+            df_long = df_long.sort_values("_sort_order").drop(columns=["_sort_order"])
 
-        # 4. 绘图风格设置 (参考 image_62442b 样式)
-        plt.figure(figsize=(12, 7))
+        # 4. 绘图 (如果是 Facet 模式，不要创建新 Figure)
+        # FacetGrid 会自动使得当前的 plt.gca() 为目标子图
+        is_facet_mode = (data is not None)
+        
+        if not is_facet_mode:
+            plt.figure(figsize=(12, 7))
+        
         sns.set_theme(style="whitegrid", font_scale=1.1)
 
-        # 定义指标对应的线型与标记符号
-        # Max: 点线(X), P99: 实线(o), Median: 虚线(s)
         style_map = {"Max": (2, 2), "P99": "", "Median": (5, 5)}
         markers = {"Max": "X", "P99": "o", "Median": "s"}
-
+        
+        # 只要存在不同 style，hue 就需要 careful
+        # 注意：如果 FacetGrid 已经分过 hue (通过 map_dataframe(..., hue='xxx'))
+        # 那么 kwargs 里会有 hue。
+        # 但我们这里还需要强制用 Hue 分算法，用 Style 分指标。
+        # 如果 hue 参数与 plot_statistical_summary(hue=...) 冲突，以前者优先。
+        
+        current_hue = kwargs.get("hue", hue) 
+        # 如果 FacetGrid 没传 hue (比如只用了 col)，那就用默认值
+        
+        # 即使是 Facet Mode，我们也画 lineplot。
+        # 注意: lineplot 会自动画到当前 ax
         ax = sns.lineplot(
             data=df_long,
             x=x,
             y="FCT_us",
-            hue=hue,  # 颜色区分算法
-            style="Metric",  # 线型区分统计量
+            hue=current_hue, 
+            style="Metric",
             markers=markers,
             dashes=style_map,
-            palette="husl",  # 高对比度配色
+            palette="husl",
             linewidth=2,
             markersize=8,
             sort=False,
+            # Ax handling is automatic in seaborn usually, but to be safe:
+            ax=plt.gca() if is_facet_mode else None
         )
 
-        # 5. 细节优化与格式化
-        ax.set_title(title, pad=20, fontsize=14)
-        ax.set_ylabel("Flow Completion Time (us)")
-        ax.set_xlabel(x.replace("_", " ").capitalize())
-
-        # --- 【关键修正 B】: 类型敏感的 X 轴格式化 ---
-        # 理由：之前强制执行 _fmt_plain 会把分类标签的索引(0,1...)转为字符串。
-        # 仅当 X 轴数据本身是数值类型（如 nodes）时才使用自定义格式化器。
-        is_x_numeric = pd.api.types.is_numeric_dtype(df_long[x])
-        if is_x_numeric:
-            ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
-        # 如果是字符串（如 "4 20"），保持默认，Matplotlib 将显示原始标签。
-
-        # 强制拒绝科学计数法
-        # ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
-        ax.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
-
-        # 优化图例布局，防止遮挡曲线
-        plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0.0)
-        plt.grid(True, ls="--", alpha=0.4)
-
-        sns.despine(trim=False)
-        plt.tight_layout()
-        plt.show()
+        # 5. 细节优化
+        if not is_facet_mode:
+            ax.set_title(title, pad=20, fontsize=14)
+            ax.set_ylabel("Flow Completion Time (us)")
+            ax.set_xlabel(x.replace("_", " ").capitalize())
+            
+            # Independent mode extras
+            plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0.0)
+            plt.grid(True, ls="--", alpha=0.4)
+            sns.despine(trim=False)
+            plt.tight_layout()
+            plt.show()
+        else:
+            # Facet Mode cleanup
+            ax.set_xlabel(x)
+            ax.set_ylabel("FCT (us)")
+            ax.grid(True, ls="--", alpha=0.4)
 
     def plot_fct_cdf_overlap(
         self,
@@ -1346,7 +1464,12 @@ class BatchVisualizer:
             df[label_col] = "all"
 
         # 核心修改：归一化处理
-        plot_df = df[factors + metrics + [label_col]].copy()
+        # [Fix] 去重，避免 hue (label_col) 在 factors 中导致列重复 (ValueError: Buffer has wrong number of dimensions)
+        req_cols = list(dict.fromkeys(factors + metrics + [label_col]))
+        plot_df = df[req_cols].copy()
+        
+        # [Fix] 显式保留分类标签列，防止被后面归一化重命名破坏 (KeyError: 'class')
+        plot_df["class"] = df[label_col].values
         
         # 预先计算并保存原始范围用于标签
         range_labels = {}
@@ -1360,12 +1483,18 @@ class BatchVisualizer:
                 min_str, max_str = "", ""
                 is_categorical = False
 
-                # 1. 如果是非数值列，先进行 LabelEncode
+                # 1. 预处理：Boolean 转 Int, String 转 Int (LabelEncode)
+                if pd.api.types.is_bool_dtype(plot_df[col]):
+                     plot_df[col] = plot_df[col].astype(int)
+                
+                min_str, max_str = "", ""
+                is_categorical = False
+
+                # 检查是否为数值 (此时 Bool 已转 Int，应视为数值)
                 if not pd.api.types.is_numeric_dtype(plot_df[col]):
                     is_categorical = True
                     try:
                         le = LabelEncoder()
-                        # 强制转字符串以防混合类型
                         plot_df[col] = le.fit_transform(plot_df[col].astype(str))
                         if len(le.classes_) > 0:
                             min_str = str(le.classes_[0])
@@ -1373,13 +1502,16 @@ class BatchVisualizer:
                     except Exception:
                         continue
                 else:
-                    # 数值列直接获取 Min/Max 字符串
+                    # 数值列 (含 Bool->Int)
                     min_val_raw = plot_df[col].min()
                     max_val_raw = plot_df[col].max()
                     min_str = self._smart_format(col, min_val_raw)
                     max_str = self._smart_format(col, max_val_raw)
 
-                # 2. 统一归一化 (无论是原始数值还是 Encode 后的整数)
+                # 2. 统一归一化
+                # 强制转 float 以避免 int 运算问题或潜在的 bool 残留
+                plot_df[col] = plot_df[col].astype(float)
+                
                 min_val = plot_df[col].min()
                 max_val = plot_df[col].max()
 
@@ -1403,7 +1535,8 @@ class BatchVisualizer:
         # [Custom Implementation] Curved Parallel Coordinates
         # 丢弃 pandas.plotting.parallel_coordinates，改用自定义 Bezier 实现
         
-        plot_df = plot_df.rename(columns={label_col: "class"})
+        # plot_df = plot_df.rename(columns={label_col: "class"})
+        # [Fix] 不需要再重命名了，前面已经手动创建了 class 列
         cols_to_plot = [c for c in plot_df.columns if c != "class"]
         
         # 提取数据矩阵 (N_samples, M_axes)
@@ -1495,14 +1628,16 @@ class BatchVisualizer:
                 hl_segs = _make_bezier_curves(hl_data, x_coords)
                 
                 # 颜色映射逻辑
-                unique_labels = np.unique(hl_labels)
+                # [Fix] 使用 pd.factorize 避免 numpy 标量/数组不可哈希的问题
+                codes, unique_labels = pd.factorize(hl_labels, sort=True)
+                
                 if len(unique_labels) > 1:
                     # 使用 viridis 映射分类
                     cmap = plt.get_cmap("viridis")
-                    # 简单 hash labels 到 float [0,1]
-                    label_map = {l: i/(len(unique_labels)-1) if len(unique_labels)>1 else 0.5 
-                                 for i, l in enumerate(sorted(unique_labels))}
-                    colors = [cmap(label_map[l]) for l in hl_labels]
+                    # Normalize codes to [0, 1]
+                    # codes 是整数数组，直接归一化
+                    norm_vals = codes / (len(unique_labels) - 1)
+                    colors = cmap(norm_vals)
                 else:
                     colors = "teal" # 默认单色
 
@@ -1670,6 +1805,15 @@ class BatchVisualizer:
             print("[!] No valid data for response surface.")
             return
 
+        # [Fix] 类型检查：确保 X, Y 为数值类型
+        # 尝试强制转换，如果失败则这些列可能包含无法解析的字符串 (如 "10 20")
+        try:
+            plot_df[x] = pd.to_numeric(plot_df[x])
+            plot_df[y] = pd.to_numeric(plot_df[y])
+        except (ValueError, TypeError):
+             print(f"[Warn] Response Surface requires numeric X/Y axes. Function aborted.\n    Got types: {x}={plot_df[x].dtype}, {y}={plot_df[y].dtype}")
+             return
+
         X = plot_df[x].values
         Y = plot_df[y].values
         Z = plot_df[z].values
@@ -1775,6 +1919,10 @@ class BatchVisualizer:
             )
 
         # 3. 带宽延迟积相关 (Linkspeed vs Hop Latency)
+        if "linkspeed" in varying and "hop_latency" in varying:
+            print(f"[Auto-Analysis] Detected BDP Factors. Plotting Interaction for {target_metric}...")
+            self.plot_response_surface(
+                x="linkspeed",
                 y="hop_latency",
                 z=target_metric,
                 title=f"BDP Impact: {target_metric} vs Bandwidth & Delay",
@@ -1865,13 +2013,7 @@ class BatchVisualizer:
         plt.grid(True, linestyle='--', alpha=0.3)
         plt.title(title if title else f"{x} vs {y}")
         plt.tight_layout()
-        plt.show()             self.plot_response_surface(
-                x="linkspeed",
-                y="hop_latency",
-                z=target_metric,
-                title=f"BDP Impact: {target_metric} vs Bandwidth & Latency",
-                cmap="viridis"
-             )
+        plt.show()
 
     # ==========================================
     # 8. Smart Analysis Capabilities (LHS-Native)
