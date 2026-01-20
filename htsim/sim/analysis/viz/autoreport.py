@@ -53,7 +53,6 @@ class AutoVisualizer:
             "Incast Fan-in vs. Pressure": self._plot_incast_fanin_pressure,
             "Protocol Efficiency (Payload vs Control)": self._plot_protocol_efficiency,
             "Flow Path Spatio-Temporal Heatmap": self._plot_flow_path_heatmap_auto,
-            "Congestion Control Diagnostic": self._plot_cc_diagnostic_auto,
             "Full Stack Analysis (Trace)": self._plot_flow_trace_auto,
         }
 
@@ -91,7 +90,6 @@ class AutoVisualizer:
                 "title": "Phase 4: 因果关联 (The Causality)",
                 "question": "观察 cwnd 的下降是否是对队列上升的即时响应？队列排空后 cwnd 是否恢复太慢？",
                 "items": [
-                    "Congestion Control Diagnostic",
                     "Full Stack Analysis (Trace)",
                     "Incast Fan-in vs. Pressure",
                     "Bottleneck Correlation Analysis",
@@ -176,9 +174,9 @@ class AutoVisualizer:
         has_cwnd_data = not self.result.cwnd_df.empty
 
         if (is_debug_enabled or has_cwnd_data) and "flow_events" in self.enabled_logs:
-            active["Congestion Control Diagnostic"] = self.plotters[
-                "Congestion Control Diagnostic"
-            ]
+            # active["Congestion Control Diagnostic"] = self.plotters[
+            #     "Congestion Control Diagnostic"
+            # ]
             active["Full Stack Analysis (Trace)"] = self.plotters[
                 "Full Stack Analysis (Trace)"
             ]
@@ -700,155 +698,30 @@ class AutoVisualizer:
     # 3. NIC Plotters
     # ==========================================
 
-    def _plot_cc_diagnostic(self, target_flow_name: str):
-        """
-        [Final Robust Version] 深度诊断视图：CWND + 瓶颈队列 + TRIM/DROP 事件。
-        """
-        res = self.result
-
-        # 1. 获取 CWND 数据 (来自 stdout.log)
-        cwnd_data = res.cwnd_df[res.cwnd_df["flow_name"] == target_flow_name].copy()
-        if cwnd_data.empty:
-            return None
-
-        # 2. 身份动态探测 (LoggedID 匹配)
-        # 逻辑：在 idmap 中寻找与流名匹配且在 traffic_df 中有实际记录的 ID
-        candidate_ids = [k for k, v in res.idmap.items() if target_flow_name in v]
-        active_traffic_ids = set(res.traffic_df["flow_id"].unique())
-
-        traffic_logged_id = next(
-            (cid for cid in candidate_ids if cid in active_traffic_ids), None
-        )
-
-        # 3. 提取数据
-        traffic_data = (
-            res.traffic_df[res.traffic_df["flow_id"] == traffic_logged_id].copy()
-            if traffic_logged_id
-            else pd.DataFrame()
-        )
-
-        # 4. 自动定位瓶颈 (该流丢包最多的位置)
-        hotspot_name = None
-        if not traffic_data.empty:
-            err_df = traffic_data[traffic_data["event"].isin(["DROP", "TRIM"])]
-            hotspot_name = (
-                err_df["name"].value_counts().idxmax()
-                if not err_df.empty
-                else traffic_data["name"].value_counts().idxmax()
-            )
-
-        # 5. 渲染
-        fig, ax1 = plt.subplots(figsize=(14, 6))
-        ax2 = ax1.twinx()
-
-        # 单位转换
-        cwnd_data["time_us"] = cwnd_data["time"] * 1e6
-        ax1.step(
-            cwnd_data["time_us"],
-            cwnd_data["cwnd"],
-            label="CWND",
-            color="#1f77b4",
-            where="post",
-        )
-        ax1.fill_between(
-            cwnd_data["time_us"],
-            0,
-            cwnd_data["in_flight"],
-            alpha=0.1,
-            color="#1f77b4",
-            step="post",
-            label="In-Flight",
-        )
-
-        if hotspot_name:
-            q_data = self._to_us(
-                res.active_queue_df[res.active_queue_df["name"] == hotspot_name]
-            )
-            ax2.plot(
-                q_data["time"],
-                q_data["max_q"],
-                label=f"Queue @ {hotspot_name}",
-                color="#d62728",
-                alpha=0.4,
-                ls=":",
-            )
-
-            t_plot = self._to_us(traffic_data)
-            for _, row in t_plot[t_plot["event"].isin(["DROP", "TRIM"])].iterrows():
-                ax1.axvline(
-                    row["time"],
-                    color="#ff7f0e" if row["event"] == "TRIM" else "#d62728",
-                    alpha=0.3,
-                    ls="--",
-                )
-
-        ax1.set_title(
-            f"CC Diagnostic: {target_flow_name} (LoggedID: {traffic_logged_id})"
-        )
-        ax1.set_xlabel("Time (us)")
-        ax1.set_ylabel("Bytes (CWND)")
-        ax2.set_ylabel("Queue Depth (Bytes)")
-        ax1.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
-        ax2.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_bytes))
-        ax1.legend(loc="upper right")
-
-        return fig
-
-    def _plot_cc_diagnostic_auto(self):
-        """
-        [Corrected] 自动选择受害流。
-        逻辑：通过 IdMap 桥接 Logged ID 和逻辑名称，并优先选择 Slowdown 最大的流。
-        """
-        res = self.result
-        sd_df = res.flow_slowdown_df
-        target_name = None
-
-        if not sd_df.empty and not res.cwnd_df.empty:
-            # 1. 按 Slowdown 降序排列 (从最惨的流开始试)
-            sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
-
-            # 2. 依次检查受害流是否在 stdout.log (cwnd_df) 中有记录
-            # 因为可能只有部分流开启了 -debug_flowid
-            for _, row in sorted_worst.iterrows():
-                log_id = row["flow_id"]  # 这里的 ID 是 Logged ID (如 9098)
-                name = res.idmap.get(log_id)  # 翻译为 "Uec_304_0"
-
-                if name and name in res.cwnd_df["flow_name"].values:
-                    target_name = name
-                    print(
-                        f"ℹ️ 自动诊断锁定最高 Slowdown 流: {target_name} (ID: {log_id})"
-                    )
-                    break
-
-        # 3. 兜底：如果最惨的流没开 debug，找 cwnd_df 里有的第一个流
-        if target_name is None and not res.cwnd_df.empty:
-            target_name = res.cwnd_df["flow_name"].unique()[0]
-            print(f"ℹ️ 兜底方案：选择日志中存在的流: {target_name}")
-
-        if target_name:
-            return self._plot_cc_diagnostic(target_name)
-        return None
+    # ==========================================
+    # [Merged] Full Stack Trace (Auto Wrapper)
+    # ==========================================
 
     def _plot_flow_trace_auto(self):
         """
         [New] 自动绘制 Full Stack Trace。
-        逻辑：同 _plot_cc_diagnostic_auto，自动寻找最慢流并绘制 Seq/RTT 图。
+        逻辑：优先选择 Slowdown 最大的受害流（且存在于 debug log 中）。
         """
         res = self.result
         sd_df = res.flow_slowdown_df
         target_name = None
 
         if not sd_df.empty and not res.cwnd_df.empty:
+            # 1. 优先找最惨的流
             sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
             for _, row in sorted_worst.iterrows():
                 log_id = row["flow_id"]
                 name = res.idmap.get(log_id)
-                if name: # Note: Unlike CC diag, Flow Trace relies on grep from stdout, not just cwnd_df. 
-                         # But checking cwnd_df is a good proxy for "is logged".
-                    if name in res.cwnd_df["flow_name"].values:
-                        target_name = name
-                        print(f"ℹ️ [Trace] 自动锁定: {target_name} (ID: {log_id})")
-                        break
+                # 必须确保名字能对应到 stdout.log 里的数据
+                if name and name in res.cwnd_df["flow_name"].values:
+                    target_name = name
+                    print(f"ℹ️ [Trace] 自动锁定最惨流: {target_name} (ID: {log_id})")
+                    break
 
         if target_name is None and not res.cwnd_df.empty:
             target_name = res.cwnd_df["flow_name"].unique()[0]
@@ -858,6 +731,9 @@ class AutoVisualizer:
             return self.plot_flow_trace(target_name)
         return None
 
+        if target_name:
+            return self.plot_flow_trace(target_name)
+        return None
 
     def _plot_cwnd_dynamics(self, target_flow_name: str = None):
         """
@@ -1557,122 +1433,326 @@ class AutoVisualizer:
 
     def plot_flow_trace(self, flow_name: str):
         """
-        [New] Full Stack Analysis: Seq, Congestion & RTT.
-        Replicates the superior visualization from data_extraction/plot_trace.py.
+        [Final Merged] Full Stack Analysis: Protocol + Network + Latency.
+        融合了原有的 Sequence 视图和 Congestion Diagnostic 视图，
+        在同一时间轴下展示：
+        1. Protocol: SeqNo, ACK, Retransmission, CWND, InFlight
+        2. Network: Bottleneck Queue Depth, Physical DROP/TRIM Events
+        3. Latency: Split RTT (Prop vs Queue)
         """
+        res = self.result
         events = self.result.get_flow_trace_data(flow_name)
         if not events or not events["send_t"]:
             print(f"No trace data found for {flow_name}")
             return None
 
-        # Create Layout: 2 Subplots (Seq/CWND, Latency)
-        fig, (ax1, ax3) = plt.subplots(
-            2, 1, figsize=(16, 12), sharex=True, gridspec_kw={"height_ratios": [3, 1]}
+        # --- Data Prep for Network Layer (Logic ported from cc_diagnostic) ---
+        # 1. 尝试找到物理世界的 LoggedID
+        # 逻辑：在 idmap 中寻找与 name 匹配的 ID
+        candidate_ids = [k for k, v in res.idmap.items() if flow_name in v]
+        active_traffic_ids = (
+            set(res.traffic_df["flow_id"].unique())
+            if not res.traffic_df.empty
+            else set()
         )
-        
-        # === 1. Main Plot (SeqNo) ===
-        ax1.set_ylabel("Sequence Number", color="tab:blue", fontsize=12, fontweight="bold")
+
+        traffic_logged_id = next(
+            (cid for cid in candidate_ids if cid in active_traffic_ids), None
+        )
+
+        traffic_data = pd.DataFrame()
+        hotspot_name = None
+
+        if traffic_logged_id:
+            traffic_data = res.traffic_df[
+                res.traffic_df["flow_id"] == traffic_logged_id
+            ].copy()
+            if not traffic_data.empty:
+                # 自动定位瓶颈：丢包/裁剪最多的位置，或者最活跃的位置
+                err_df = traffic_data[traffic_data["event"].isin(["DROP", "TRIM"])]
+                hotspot_name = (
+                    err_df["name"].value_counts().idxmax()
+                    if not err_df.empty
+                    else traffic_data["name"].value_counts().idxmax()
+                )
+
+        # --- Visualization Layout ---
+        # 2 Rows: Protocol (Top), Network/Latency (Bottom - Dual Axis)
+        fig, (ax1, ax_net) = plt.subplots(
+            2,
+            1,
+            figsize=(16, 10),
+            sharex=True,
+            gridspec_kw={"height_ratios": [3, 2], "hspace": 0.05},
+        )
+
+        # ==========================================
+        # Row 1: Protocol Layer (Seq & CWND)
+        # ==========================================
+        ax1.set_ylabel(
+            "Sequence Number", color="tab:blue", fontsize=11, fontweight="bold"
+        )
         ax1.tick_params(axis="y", labelcolor="tab:blue")
 
-        # Normal Sends (Blue Dots)
+        # Sends
         ax1.scatter(
-            events["send_t"], events["send_seq"],
-            c="blue", alpha=0.6, s=60, label="Normal Send", edgecolors="none"
+            events["send_t"],
+            events["send_seq"],
+            c="blue",
+            alpha=0.5,
+            s=40,
+            label="Normal Send",
+            edgecolors="none",
         )
-        
-        # Retransmissions (Red Crosses)
+        # Retransmissions
         if events["rtx_t"]:
             ax1.scatter(
-                events["rtx_t"], events["rtx_seq"],
-                c="red", marker="x", s=150, linewidth=3, label="Retransmission", zorder=10
+                events["rtx_t"],
+                events["rtx_seq"],
+                # 重传使用空心圆圈
+                marker="o",
+                s=80,
+                linewidth=1.5,
+                label="Retransmission",
+                zorder=10,
+                facecolors="none",
+                edgecolors="red",
             )
-
-        # Cumulative ACKs (Green Step)
+        # ACKs
         if events["ack_t"]:
-             # Sort by time to ensure step plot is correct
             sorted_acks = sorted(zip(events["ack_t"], events["ack_seq"]))
             if sorted_acks:
                 a_t, a_s = zip(*sorted_acks)
                 ax1.step(
-                    a_t, a_s,
-                    c="green", where="post", alpha=0.7, linewidth=2.5, label="Cum ACK"
+                    a_t,
+                    a_s,
+                    c="green",
+                    where="post",
+                    alpha=0.7,
+                    linewidth=2,
+                    label="Cum ACK",
                 )
-
-        # RTO Events (Orange Dashed Lines)
+        # RTO Lines (Show on all plots)
         unique_rto = sorted(list(set(events["rto_t"])))
         for i, t in enumerate(unique_rto):
             label = "RTO Event" if i == 0 else None
-            ax1.axvline(x=t, color="orange", linestyle="--", alpha=0.8, linewidth=2, label=label)
+            for ax in [ax1, ax_net]:
+                ax.axvline(
+                    x=t, color="orange", linestyle="--", alpha=0.5, linewidth=1.5
+                )
 
-        # === Secondary Y-axis (CWND/InFlight) ===
-        ax2 = ax1.twinx()
-        ax2.set_ylabel("Bytes (CWND / In-Flight)", color="tab:purple", fontsize=12, fontweight="bold")
-        ax2.tick_params(axis="y", labelcolor="tab:purple")
+        # --- Precise TRIM/DROP Mapping ---
+        # Map physical drops/trims from Traffic Log directly to Sequence Number
+        t_plot = self._to_us(traffic_data)
+        physical_events = t_plot[t_plot["event"].isin(["DROP", "TRIM"])]
+
+        if not physical_events.empty:
+            # Drop Events
+            drops = physical_events[physical_events["event"] == "DROP"]
+            if not drops.empty:
+                ax1.scatter(
+                    drops["time"],
+                    drops["pkt_id"],
+                    # 丢包使用 X
+                    c="red",
+                    marker="X",
+                    s=100,
+                    linewidth=2,
+                    label="Physical DROP",
+                    zorder=20,
+                )
+
+            # Trim Events
+            trims = physical_events[physical_events["event"] == "TRIM"]
+            if not trims.empty:
+                ax1.scatter(
+                    # TRIM 使用三角
+                    trims["time"],
+                    trims["pkt_id"],
+                    c="tab:orange",
+                    marker="^",
+                    s=80,
+                    linewidth=1.5,
+                    label="Physical TRIM",
+                    zorder=20,
+                )
+
+        # Twin Axis for CWND
+        ax1_r = ax1.twinx()
+        ax1_r.set_ylabel(
+            "Bytes (CWND / In-Flight)",
+            color="tab:purple",
+            fontsize=11,
+            fontweight="bold",
+        )
+        ax1_r.tick_params(axis="y", labelcolor="tab:purple")
 
         if events["cwnd_t"]:
             sorted_cwnd = sorted(zip(events["cwnd_t"], events["cwnd_val"]))
             c_t, c_v = zip(*sorted_cwnd)
-            ax2.plot(c_t, c_v, color="tab:purple", linestyle="-", linewidth=2, alpha=0.9, label="CWND")
+            ax1_r.plot(c_t, c_v, color="tab:purple", lw=2, alpha=0.9, label="CWND")
 
         if events["inflight_t"]:
             sorted_inf = sorted(zip(events["inflight_t"], events["inflight_val"]))
             i_t, i_v = zip(*sorted_inf)
-            ax2.plot(i_t, i_v, color="gray", linestyle=":", alpha=0.6, label="In-Flight")
-            ax2.fill_between(i_t, 0, i_v, color="gray", alpha=0.15)
+            ax1_r.fill_between(
+                i_t, 0, i_v, color="gray", alpha=0.15, step="post", label="In-Flight"
+            )
 
-        # === Legend ===
-        lines_1, labels_1 = ax1.get_legend_handles_labels()
-        lines_2, labels_2 = ax2.get_legend_handles_labels()
-        ax1.legend(
-            lines_1 + lines_2, labels_1 + labels_2,
-            loc="center", bbox_to_anchor=(0.5, 0.9), ncol=1,
-            frameon=True, facecolor="white", edgecolor="gray", framealpha=0.85, 
-            shadow=False, fancybox=True, fontsize=10
+        ax1.set_title(
+            f"Full Stack Analysis: {flow_name} (LogID: {traffic_logged_id})",
+            fontsize=14,
+            pad=10,
         )
-        
-        ax1.grid(True, which="major", linestyle="--", alpha=0.5)
-        ax1.set_title(f"Full Stack Analysis: {flow_name}", fontsize=16, pad=20)
 
-        # === 2. Sub Plot (Latency) ===
-        ax3.set_ylabel("Latency (us)", color="tab:brown", fontsize=12, fontweight="bold")
-        ax3.set_xlabel("Time (us)", fontsize=12, fontweight="bold")
+        # === Legend Row 1 ===
+        lines1, labs1 = ax1.get_legend_handles_labels()
+        lines1r, labs1r = ax1_r.get_legend_handles_labels()
+        ax1.legend(
+            lines1 + lines1r,
+            labs1 + labs1r,
+            loc="upper right",
+            ncol=1,
+            fontsize=9,
+            framealpha=0.9,
+        )
+
+        ax1_r.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_bytes))
+
+        # ==========================================
+        # Row 2: Network (Left) + Latency (Right)
+        # ==========================================
+        # Left Axis: Queue Depth
+        ax_net.set_ylabel(
+            "Queue Depth (Bytes)", color="#d62728", fontsize=11, fontweight="bold"
+        )
+        ax_net.tick_params(axis="y", labelcolor="#d62728")
+        ax_net.set_xlabel("Time (us)", fontsize=11, fontweight="bold")  # Shared X label
+
+        has_net_data = False
+        if hotspot_name:
+            # Plot Queue Depth
+            q_data = self._to_us(
+                res.active_queue_df[res.active_queue_df["name"] == hotspot_name]
+            )
+            if not q_data.empty:
+                ax_net.plot(
+                    q_data["time"],
+                    q_data["max_q"],
+                    label=f"Hotspot Queue @ {hotspot_name}",
+                    color="#d62728",
+                    alpha=0.6,
+                    lw=1.5,
+                )
+                ax_net.fill_between(
+                    q_data["time"], 0, q_data["max_q"], color="#d62728", alpha=0.05
+                )
+                has_net_data = True
+
+            # Plot Physical Drops/Trims
+            t_plot = self._to_us(traffic_data)
+            drops = t_plot[t_plot["event"].isin(["DROP", "TRIM"])]
+            if not drops.empty:
+                for ev_type, color in [("TRIM", "#ff7f0e"), ("DROP", "red")]:
+                    sub = drops[drops["event"] == ev_type]
+                    if not sub.empty:
+                        ax_net.vlines(
+                            sub["time"],
+                            0,
+                            ax_net.get_ylim()[1],
+                            colors=color,
+                            alpha=0.4,
+                            linestyles="-",
+                            lw=1,
+                            label=f"Physical {ev_type}",
+                        )
+                has_net_data = True
+
+            # if has_net_data:
+            #     ax_net.text(0.01, 0.9, f"Hotspot: {hotspot_name}", transform=ax_net.transAxes,
+            #                 bbox=dict(facecolor='white', alpha=0.7))
+
+        if not has_net_data:
+            ax_net.text(
+                0.5,
+                0.5,
+                "No Queue Log Data",
+                ha="center",
+                va="center",
+                transform=ax_net.transAxes,
+                color="gray",
+            )
+
+        ax_net.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_bytes))
+
+        # Right Axis: Latency (RTT & Delay)
+        ax_lat = ax_net.twinx()
+        ax_lat.set_ylabel(
+            "Latency (us)", color="tab:brown", fontsize=11, fontweight="bold"
+        )
+        ax_lat.tick_params(axis="y", labelcolor="tab:brown")
 
         if events["rtt_t"]:
-            sorted_rtt_all = sorted(zip(events["rtt_t"], events["delay_val"], events["raw_rtt_val"]))
+            sorted_rtt_all = sorted(
+                zip(events["rtt_t"], events["delay_val"], events["raw_rtt_val"])
+            )
             r_t, d_v, raw_v = zip(*sorted_rtt_all)
 
-            ax3.plot(r_t, raw_v, color="tab:brown", marker=".", markersize=8, linestyle="-", linewidth=1.5, alpha=0.9, label="Total RTT (Raw)")
-            ax3.plot(r_t, d_v, color="orange", linestyle="--", linewidth=1, alpha=0.6, label="Queueing Delay")
-            ax3.fill_between(r_t, 0, d_v, color="orange", alpha=0.2)
+            ax_lat.plot(
+                r_t,
+                raw_v,
+                color="tab:brown",
+                marker=".",
+                markersize=5,
+                lw=1,
+                alpha=0.8,
+                label="Total RTT",
+            )
+            ax_lat.plot(
+                r_t,
+                d_v,
+                color="orange",
+                ls="--",
+                lw=1,
+                alpha=0.8,
+                label="Queueing Delay",
+            )
+            # ax_lat.fill_between(r_t, 0, d_v, color="orange", alpha=0.05) # Optional: remove fill to reduce clutter overlap
 
-            if raw_v:
-                max_raw = max(raw_v)
-                max_t = r_t[raw_v.index(max_raw)]
-                ax3.annotate(
-                    f"Max RTT: {max_raw:.2f}us",
-                    xy=(max_t, max_raw), xytext=(max_t + 50, max_raw),
-                    arrowprops=dict(facecolor="black", shrink=0.05),
-                    fontsize=10, fontweight="bold"
+            max_raw = max(raw_v)
+            if max_raw > 0:
+                ax_lat.text(
+                    0.01,
+                    0.82,
+                    f"Max RTT: {max_raw:.1f}us",
+                    transform=ax_lat.transAxes,
+                    fontsize=9,
+                    bbox=dict(facecolor="white", alpha=0.7),
                 )
-                
-                # Estimate Base RTT (min of Raw - Delay)
-                # Note: delay is calc by parsed logic (raw - base). So raw - delay should be roughly base.
-                base_rtt_est = min([r - d for r, d in zip(raw_v, d_v)])
-                ax3.text(
-                    0.02, 0.9, f"Est. Base RTT ≈ {base_rtt_est:.2f}us",
-                    transform=ax3.transAxes, fontsize=10,
-                    bbox=dict(facecolor="white", alpha=0.8, edgecolor="gray", boxstyle="round")
-                )
 
-        ax3.legend(loc="upper right", facecolor="white", framealpha=0.8, edgecolor="gray")
-        ax3.grid(True, which="both", linestyle="--", alpha=0.3)
-        
-        # RTO lines on subplot too
-        for t in unique_rto:
-            ax3.axvline(x=t, color="orange", linestyle="--", alpha=0.4)
+        # Legends Row 2
+        lines2, labs2 = ax_net.get_legend_handles_labels()
+        lines3, labs3 = ax_lat.get_legend_handles_labels()
+        ax_net.legend(
+            lines2 + lines3,
+            labs2 + labs3,
+            loc="upper right",
+            fontsize=9,
+            framealpha=0.9,
+        )
 
-        # Format X Axis
-        ax3.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
-        
+        ax_net.grid(True, ls=":", alpha=0.4)
+
+        # Consistent Formatter
+        for ax in [ax1, ax_net]:
+            ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+
+        # Align X-axis limits
+        all_times = events["send_t"] + events["ack_t"]
+        if all_times:
+            t_min, t_max = min(all_times), max(all_times)
+            duration = t_max - t_min
+            margin = duration * 0.02 if duration > 0 else 10.0
+            ax_net.set_xlim(left=t_min - margin, right=t_max + margin)
+
         return fig
-
