@@ -154,27 +154,62 @@ CDF 曲线显示了一个极其陡峭的长尾。P99 (457us) 和 Max (732us) 之
 *图8：拥塞事件（Trim）在时间轴上的密集爆发。*
 所有的拥塞事件都集中在模拟的最前端（20-80us）。这证实了 **Micro-burst（微突发）** 的特征：极短时间内的极高强度冲击。系统没有“喘息”的机会来调整 Rate。
 
-##### 3.3.6.4. CWND 塌陷 (Congestion Window Collapse)
+##### 3.3.6.4. 记账死锁与 RTO 破局 (Accounting Deadlock & RTO Breakout)
 
-![CWND Trace](.assets/fig9_conns64_diagnostic_cc_cwnd.png)
-*图9：受害流 (Flow 9098) 的 CWND 变化轨迹。*
-这是一个教科书式的 **RTO (Retransmission Timeout)** 案例：
+![CWND Trace](.assets/fig9_conns64_full_stack_trace.png)
+*图9：受害流 (Flow 9098) 的 CWND 变化与完整状态轨迹。*
 
-1. **0-50us**: 初始爆发，CWND 迅速爬升。
-2. **50us**: 遭遇丢包/Trim，CWND 被拥塞控制算法强制 Reset 到 1 MSS（极低水平）。
-3. **50-280us**: 处于 RTO 等待期或极慢的恢复期，几乎没有吞吐。
-4. **280-700us**: 漫长的静默（可能在等待重传计时器）。
-5. **700us+**: 终于完成重传，结束流。
-**“一着不慎，满盘皆输”**：一旦在 Incast 早期触雷，该流就基本宣告“死亡”，由此产生了巨大的长尾延迟。
+这是一个教科书式的 **通过 RTO 跳出记账死锁** 的案例：
+
+1. **0-50us**: 初始爆发阶段。CWND 维持在高位（~250KB），数据包（Pkt 0-13）快速发出。
+2. **50us+**: 遭遇 Incast 冲击。Switch 开始产生 Physical TRIM（橘色三角），Pkt 5 和 Pkt 6 被裁剪。CWND 被拥塞算法强制压制到 **1 MSS** (4.1KB)。
+3. **100-700us**: **进入记账死锁 (Accounting Deadlock)**。
+    - 接收端发回了 Pkt 7, 8, 9, 12 的 SACK（绿色实心点）。
+    - **关键**：由于 CumAck 被 Pkt 5 的空洞堵住，Source 端的 `_in_flight`（灰色阴影区）始终处于高位（~24KB），远超目前的 `cwnd` (4.1KB)。
+    - 发送端认为管道已满（in_flight > cwnd），即使收到了 NACK/SACK 也不敢发出任何重传包。
+4. **700us**: **RTO 破局**。重传计时器超时（黄色虚线），强制触发 Pkt 5 的重传（红色空心圆），并手动清理 `in_flight` 状态。
+5. **700us+**: Pkt 5 到达后 CumAck 瞬间推进，后续重传顺利进行，流最终完成。
+**“一着不慎，满盘皆输”**：一旦在 Incast 早期触雷并形成空洞，在 1-MSS 窗口与 SACK-Ignorant 记账的双重作用下，流就会陷入死锁。
 
 ##### 3.3.6.5. 逐跳轨迹 (Detailed Path Trace)
 
 ![Path Trace](.assets/fig10_conns64_diagnostic_flow_trace.png)
-*图10：Flow 9098 的全链路微观轨迹。*
+*图10：Flow 9098 的全链路微观轨迹（含标注）。*
 从图中可以清晰看到：
 
 - **Packet Loss**: 在 ToR (Last Hop) 处，黄/红色的方块密集，代表严重的排队和丢包。
 - **Gap**: 在 50us 到 700us 之间出现巨大的空白区（Gap），这是 RTO 等待的铁证。
+- **Lost Trigger**: 注意图中绿色实心圆（SACK）依然在产生，但序列号线（蓝色）在长达 600us 的时间内完全水平，证明发送端即使收到了反馈也拒绝发包。
+
+##### 3.3.6.6. 根因深挖：实现层面的逻辑死锁 (Implementation Deadlock)
+
+经过对 `uec.cpp` 源码的深度审计及与 UEC 1.0 规范的对比以及 3.3.6.4 节的实验结果，确认 700us 停顿的本质并非算法设计问题，而是**实现层面的逻辑死锁**。该死锁由三个耦合的缺陷组成：
+
+**1. 窗口钳制 (1-MSS Window Muzzle)**
+在 Incast 爆发时，`quick_adapt` 机制将 `cwnd` 压制到最小的 `1 MSS` (4160 bytes)。这意味着只要有超过 1 个包在“ flight”状态，发送端就会关门。
+
+**2. 记账脱节 (SACK-Ignorant Accounting)**
+源码中的 `_in_flight` 计数器更新逻辑极度原始：
+- **缺陷**：收到 SACK 时（`handleAckno`），代码仅清理记录但**不减少** `_in_flight` 数值。
+- **后果**：空洞之后的包（Pkt 7-12）变成了“死重（Deadweight）”。尽管接收端已确认收到，但在发送端眼里，它们依然占据着窗口位置。
+
+**3. 阈值盲区 (Threshold Blindness in SLEEK/Recovery)**
+代码中负责快速恢复的机制名为 **SLEEK**（对应规范的 Loss Recovery），其逻辑如下：
+- **触发门槛**：要求乱序包数量 `ooo >= 3`（或 `1.5 * cwnd`）。
+- **致命悖论**：在极度拥塞时，`cwnd=1`。发送端受限于窗口只能发 1 个包，因此永远无法在接收端产生 3 个乱序包的反馈，导致 **Recovery 模式永远无法激活**。
+
+**死锁场景复现**：
+> `in_flight` (24KB) >> `cwnd` (4KB) 且处于 `Normal Mode` (无法绕过窗口检查)。
+> 即使收到 NACK/TRIM，重传指令也会被 `can_send_NSCC` 检查拦截。系统失去所有事件驱动能力，陷入死寂。
+
+##### 3.3.6.7. SLEEK 机制内涵与规范一致性
+
+虽然 "SLEEK" 是代码中的私有代号，但其逻辑高度符合 UEC 1.0 规范：
+- **探测 (Probing)**：对应规范的 `Tail Loss Detection` 及 `Probe CP`。
+- **判决 (Decision)**：利用 Probe RTT 与 `target_Qdelay` 的对比来区分布分丢包与拥塞丢包，这是 UEC 的核心特征。
+- **恢复 (Recovery)**：扫描 `_tx_bitmap` 将丢失包加入 `_rtx_queue`。
+
+**故障总结**：本次 RTO 事故是由于 **“过于保守的恢复门槛”** 与 **“过时的窗口记账逻辑”** 在极小窗口场景下发生碰撞导致的“逻辑停摆”。
 
 ### 3.4 [2026-01-20] Targeted LHS: Robustness Validation (鲁棒性验证)
 
@@ -211,103 +246,76 @@ CDF 曲线显示了一个极其陡峭的长尾。P99 (457us) 和 Max (732us) 之
 
 ---
 
-## 4. 逻辑衔接与第一性原理 (Bridging the Gap)
+## 4. 逻辑衔接与深度反思 (Deep Dive Reflection)
 
-### 4.1 为什么要回到 LHS？(The Logic Link)
+### 4.1 认知跃迁：从“调参”到“修路” (The Cognitive Shift)
 
-目前的实验处于一个尴尬的节点：
+本阶段的研究经历了一个关键的认知跃迁：最初我们试图通过“调参”（ECN, Buffer Size）来平衡性能与稳定，但最终发现问题根源在于“机制缺陷”。
 
-- **Stage 1 (LHS)**: 我们做了一次粗略的广度扫描，发现了问题（悬崖）。
-- **Stage 3 (Deep Dive)**: 我们钻进一个具体的点 (`conns=64`)，通过手动调参找到了一个解 (`ECN=0.05 0.2`)。
+- **Stage 1 (LHS)**: 发现了性能悬崖。
+- **Stage 3 (Deep Dive)**: 钻进 `conns=64` 细节，通过逐包审计发现了 **“记账死锁 (Accounting Deadlock)”**。
+- **发现的意义**: 这证明了 700us 的长尾不是网络由于拥塞而“慢”，而是协议栈由于逻辑互锁而“僵死”。
 
-**但这个解是通用的吗？**
-我们还是不知道：
+### 4.2 核心矛盾：Scale Wall vs. Logic Deadlock
 
-1. 如果 Buffer 变小了 (e.g. 0.5 BDP)，这个 ECN 参数是否会导致吞吐崩塌？
-2. 如果 Incast 规模变大了 (e.g. 128 Nodes)，这个 ECN 是否还压得住排队？
-
-**衔接逻辑**: 我们已经从“大海捞针”（找故障）阶段，进入了“地图测绘”（找安全边界）阶段。我们需要用 LHS 这种高维扫描工具，不是为了“瞎撞运气”，而是为了**量化我们找到的这个“解”的鲁棒性边界**。
-
-### 4.2 核心矛盾 (The Core Conflict)
-
-微突发优化的本质是在**激进 (Efficiency)** 与 **保守 (Robustness)** 之间寻找平衡。
-
-- **激进 (Baseline)**：追求带宽打满，但缓冲容忍度低，易发生尾部丢包（RTO）。
-- **保守 (Sleek)**：通过严格的检查和回退避免丢包，但增加了处理开销和延迟基数。
-- **新平衡点 (Optimized ECN)**：我们试图找到中间态——既不丢包，也不过度回退。
+我们现在面临两个层面的挑战：
+1. **物理层面 (Scale Wall)**: 即使解决了死锁，当并发（Incast 度）继续拉升，物理 Buffer 依然会溢出（见 3.4.1 节“Buffer 无效论”）。
+2. **协议层面 (Logic Deadlock)**: 实现层面的 SACK-Ignorant 记账和 OOO 门槛过高，导致系统在最需要恢复的时候失去了自我修复能力。
 
 ### 4.3 缺口分析 (Gap Analysis)
 
-**[已更新 2026-01-20]**
-*   **原假设**: "最佳 ECN 阈值大概率与 `queue_size` 强耦合"。
-*   **最新结论 (Robustness Scan)**: 该假设 **不成立**。Heatmap 显示 Buffer Size 对性能影响甚微。这意味着我们不需要为不同的 Buffer Size 适配不同的参数，**问题由此简化了**。
-
-**当前主要矛盾**:
-**Scale Wall**: 既然 Buffer 没用，ECN 只能微调，那么当并发度扩展到 128/256 时，系统必然崩溃。如果不引入 **Admission Control (准入控制)** 或 **Senderpacing (发送端调整)**，我们将无法突破这个物理极限。
+*   **机制缺口**: UEC 代码实现需要一次“外科手术”，修正 `_in_flight` 的 SACK 敏感性，并针对极小窗口场景（cwnd=1）降低恢复门槛。
+*   **架构缺口**: 单纯靠端到端的协议调优无法解决 Incast 的瞬时海啸。必须引入 **Admission Control (准入控制)** 或 **Fabric-Aware Window Sizing**。
 
 ---
 
-## 5. 下一步策略：架构控制 (Next Steps: Architecture Control)
+## 5. 下一步策略：从恢复到预防 (Next Steps: From Recovery to Prevention)
 
 **[Status Update 2026-01-20]**
-之前的计划 "Targeted LHS" (Robustness Mapping) 已经完成。结果证明单纯寻找 ECN/Buffer 参数无法解决扩展性问题。战术目标升级为 "Architecture Control"。
+战术重心发生质变：不再纠结于具体的 ECN 数值，而是转向“机制修复”与“架构预防”。
 
-~~**[Old Plan] 鲁棒性制图 (Robustness Mapping)**~~
-~~1. 构建假设空间: 以 `ECN=0.05 0.2` 为中心，引入干扰变量 `queue_size`。~~
-~~2. 响应曲面建模: 绘制出“安全区”等高线图。~~
-~~3. 极限压力测试: 只在模型预测的“边缘”验证。~~
+**[New Plan] 机制优化与架构准入 (Stage 5)**
 
-**[New Plan] 架构控制 (Architecture Control)**
+1.  **Protocol Surgery (机制外科手术)**:
+    *   **Action**: 修改 `uec.cpp -> handleAckno`，实现 SACK-Aware 的 `in_flight` 减支，消除“死重”。
+    *   **Action**: 优化 SLEEK 重传激活逻辑，确保在 `cwnd=1` 且收到 `NACK/TRIM` 时能立即无条件触发恢复。
 
-1.  **Admission Control Investigation (Stage 5)**:
+2.  **Admission Control (架构准入控制)**:
     *   **方向**: 既然物理吸收（Buffer）失效，必须从源头消减突发强度。
-    *   **手段**: 调研 UEC 的 `Window Sizing` 或 `Pacing` 策略，限制 Initial CWND * Conns 的总积不超过 BDP 的某个安全倍数。
+    *   **手段**: 调研 UEC 的 `Initial Window Sizing` 策略，确保 `Total Burst (Init_CWND * Conns) < k * BDP`。
 
-2.  **Verify Scalability**:
-    *   验证在引入上述控制机制后，能否将 "Safe Zone" 从 `64` 扩展到 `128` 甚至 `256`。
-
----
+3.  **Stress Test (极限压测)**:
+    *   在修复机制并开启准入后，验证系统能否平滑支撑 `Conns=128/256` 的超大规模 Incast。
 
 ---
 
-## 6. 进度分析与下一步 (Progress Analysis & Next Steps)
+## 6. 进度盘点与结案思考 (Progress Analysis & Final Thoughts)
 
-结合上述深度分析，重新审视当前的项目状态：
+### 6.1 目标達成度 (Goal Status)
 
-### 6.1 目标回顾 (Goal)
-
-- **核心目标**：在 UEC 架构下，消除 Incast 微突发导致的尾部延迟（P99/Max FCT）。
-- **量化指标**：使 P99 FCT 逼近理想值（无 RTO，无不必要的排队）。
+- **核心目标**：消除 Incast 微突发导致的尾部延迟 —— **已定位根因**（死锁），待实施修复。
+- **量化指标**：使 P99 FCT 逼近理想值 —— **已通过 ECN 优化验证了局部潜力，通过 RTO 分析指明了技术瓶颈**。
 
 ### 6.2 问题识别 (Defects)
 
-- **脆弱的平衡**：Conns=64 的实验证明，系统在默认参数下的鲁棒性极差。一旦突破某个临界点（如并发由 32->64），性能立刻从“完美”跌落至“崩溃”。
-- **Sleek 的代价**：虽然 Sleek 能兜底，但代价太大（增加平均延迟），不是理想解。
-- **ECN 的敏感性**：我们知道调 ECN 能救命，但不仅要调，还要“微秒级”地调。目前的 ECN 静态阈值可能无法适应动态多变的微突发。
+- **逻辑僵化**：当前 UEC 仿真实现对于“极小窗口 + 多点丢包”的容错性极低。
+- **物理盲信**：实验已粉碎“加大 Buffer 解决 Incast”的直觉，迫使研究转向对突发流量流控起源（Sender-side）的研究。
 
 ### 6.3 现状盘点 (Current Status)
 
 - **Done**:
-  - [x] 完成 Stage 1 广度扫描。
-  - [x] 确认 Sleek 机制的 Safety 保障能力。
-  - [x] **完成 Conns=64 崩溃点的根因分析**（CWND 塌陷 + RTO）。
-  - [x] **完成 Stage 2/4 Robustness Scan**：证明了 Buffer 扩容无效，ECN 存在宽容度。
-- **Unknowns**:
-  - [ ] **Admission Control**: 如何在 UEC 协议栈中实现基于拓扑感知的准入控制？
-  - [ ] **Ultra-Scale**: 256/512 节点的极大规模行为。
+  - [x] **根因定罪**: 确认了“SACK 记账死锁”与“SLEEK 阈值盲区”的互锁问题。
+  - [x] **物理定性**: 证明了 Buffer 扩容对 Incast 抑制的边际效应递减至零。
+  - [x] **规范对齐**: 确认 SLEEK 逻辑符合 UEC 1.0 Spec 但在极端场景下需要实现补丁。
+- **In Progress**:
+  - [/] **方案验证**: 准备实施 `in_flight` 记账逻辑的修正。
+  - [/] **架构转向**: 准备从“被动丢包恢复”转向“主动并发控制”。
 
-### 6.4 执行计划 (Action Plan)
+### 6.4 执行路线 (Action Plan)
 
-基于 "Crash Boundary" 的发现，接下来的工作重心将从 **"找问题"** 转向 **"找边界"**：
-
-1.  ~~**[Done] Targeted LHS Scan (Stage 4)**~~:
-    *   ~~不再盲目扫描，而是围绕 `ECN` 和 `Buffer Size` 这两个核心变量进行高密度扫描。~~
-    *   ~~**目的**：绘制出 Conns=64 下的 **"RTO 免役区" (RTO-Free Zone)**。~~
-    *   ==> **结论**: Buffer 作用有限，ECN 存在宽容度。无需进一步制图。
-
-2.  **[New] Architecture Control (Stage 5)**:
-    *   实现/开启 `Initial Window Sizing`。
-    *   **目标**: 无论 Conns 为多少，保证 `Initial Burst < k * BDP`。
-
-3.  **Final Validation**:
-    *   在启用架构控制后，重测 `conns [32, 256]` 的扩展性曲线。
+1.  **UEC 协议栈补丁 (The Patch)**:
+    *   修复 SACK 记账与重传激活逻辑。
+2.  **准入控制验证 (The Control)**:
+    *   实施 Initial Window Sizing 并进行全域扫描。
+3.  **全尺度验证 (The Scale)**:
+    *   绘制修复后的扩展性曲线，完成研究结案。
