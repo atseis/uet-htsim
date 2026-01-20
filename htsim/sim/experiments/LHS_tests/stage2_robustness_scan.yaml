@@ -1,0 +1,72 @@
+# 文件: configs/stage4_robustness_scan.yaml
+# 目标: 靶向 LHS 扫描，验证 ECN=0.05 解的鲁棒性边界
+# 重点: 针对 User 质疑的 "queue=8.0" 和 "target=12" 进行压力测试
+
+# [Fix] Removed 'header' block (unsupported)
+# header:
+#   mode: lhs
+#   num_samples: 200 
+
+common:
+  # execute: true  <-- experiment default inherits or we set explicitly
+  traffic:
+    type: incast
+    nodes: 432
+    flowsize: "50KB" # 固定为微突发典型值
+    prefer_remote: 1
+    # conns: 由 LHS 采样
+    
+  simulation:
+    tiers: 3
+    linkspeed: 100000
+    mtu: 4150
+    strat: ecmp_host
+    load_balancing_algo: mixed
+    paths: 64
+    logtime: 0.1
+    end: 2000
+    log:
+      - flow_events
+      - sink
+      - queue_usage  # 必须监控队列，看是否物理溢出
+
+experiments:
+  - name: robustness_scan
+    exe: htsim_uec
+    protocol: uec
+    execute: true
+    
+    # [Fix] Use 'sampling' block instead of inline dicts
+    sampling:
+      method: lhs
+      samples: 200
+      seed: 2024
+      continuous: [conns, target_q_delay, ecn_low, ecn_high]
+      log_continuous: [queue_size_bdp_factor]
+
+    traffic:
+      # [压力变量]
+      # 扫描 Incast 规模: 32 ~ 128
+      conns: [32, 128]
+      
+      # [环境干扰] - 暂不使用 load
+
+    simulation:
+      queue_type: composite
+      sender_cc_algo: nscc
+      sleek: [False] # 关闭 Sleek，只测 ECN 纯解的鲁棒性
+      
+      # [核心质疑点 1: 物理 Buffer]
+      # 扫描 "死亡禁区" 0.5 ~ 4.0 BDP (log space)
+      queue_size_bdp_factor: [0.5, 4.0]
+      
+      # [核心质疑点 2: 目标延迟]
+      # 5us ~ 25us (Uniform)
+      target_q_delay: [5.0, 25.0]
+      
+      # [优化变量: ECN]
+      # 围绕 "甜点" 0.05 / 0.2 进行扰动扫描
+      # Low: 0.01 ~ 0.15
+      # High: 0.2 ~ 1.0
+      ecn_low: [0.01, 0.15]
+      ecn_high: [0.2, 1.0]

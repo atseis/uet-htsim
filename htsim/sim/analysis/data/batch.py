@@ -1494,12 +1494,17 @@ class BatchVisualizer:
                 if not pd.api.types.is_numeric_dtype(plot_df[col]):
                     is_categorical = True
                     try:
+                        # [Fix] Fill NaNs to avoid encoding failure
+                        safe_col = plot_df[col].fillna("NaN").astype(str)
                         le = LabelEncoder()
-                        plot_df[col] = le.fit_transform(plot_df[col].astype(str))
+                        plot_df[col] = le.fit_transform(safe_col)
                         if len(le.classes_) > 0:
                             min_str = str(le.classes_[0])
                             max_str = str(le.classes_[-1])
-                    except Exception:
+                    except Exception as e:
+                        print(f"[Warn] Failed to encode column '{col}': {e}. Dropping from plot.")
+                        if col in plot_df.columns:
+                            plot_df.drop(columns=[col], inplace=True)
                         continue
                 else:
                     # 数值列 (含 Bool->Int)
@@ -1507,6 +1512,10 @@ class BatchVisualizer:
                     max_val_raw = plot_df[col].max()
                     min_str = self._smart_format(col, min_val_raw)
                     max_str = self._smart_format(col, max_val_raw)
+
+                # [Safety Check] Skip if column was dropped
+                if col not in plot_df.columns:
+                    continue
 
                 # 2. 统一归一化
                 # 强制转 float 以避免 int 运算问题或潜在的 bool 残留
@@ -1539,8 +1548,24 @@ class BatchVisualizer:
         # [Fix] 不需要再重命名了，前面已经手动创建了 class 列
         cols_to_plot = [c for c in plot_df.columns if c != "class"]
         
+        # [Safety] Final Type Coercion
+        # Ensure all plotting data is strictly numeric
+        valid_cols = []
+        for c in cols_to_plot:
+            try:
+                plot_df[c] = pd.to_numeric(plot_df[c])
+                valid_cols.append(c)
+            except Exception:
+                print(f"[Error] Column '{c}' is still non-numeric after encoding. Dropping.")
+        
+        cols_to_plot = valid_cols
+        if not cols_to_plot:
+            print("[Error] No valid numeric columns left to plot.")
+            return
+
         # 提取数据矩阵 (N_samples, M_axes)
-        data_matrix = plot_df[cols_to_plot].values
+        data_matrix = plot_df[cols_to_plot].values.astype(float)
+        
         # 提取分类标签用于着色
         class_labels = plot_df["class"].values
         
@@ -1552,6 +1577,7 @@ class BatchVisualizer:
         def _make_bezier_curves(y_data, x_coords):
             """
             生成平滑曲线的坐标点。
+
             y_data: shape (N, M)
             return: segments list of shape (N, (M-1)*steps, 2)
             """

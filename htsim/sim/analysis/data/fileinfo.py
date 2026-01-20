@@ -572,10 +572,36 @@ class ExperimentResult:
                 for line in f:
                     match = pattern.search(line)
                     if match:
-                        return int(match.group(1))
+                         return int(match.group(1))
         except Exception:
+            pass
+            
+        # If not found, try to parse target_name as an integer flow ID
+        try:
+            target_id_int = int(target_name)
+            return target_id_int
+        except ValueError:
             return None
-        return None
+
+    def get_flow_trace_data(self, flow_name: str) -> Dict[str, List[Any]]:
+        """
+        [New] Get detailed trace events for a specific flow (by Name).
+        Used for Plotly/Sequence diagrams.
+        """
+        from ..parser import flow_debug
+        
+        if not self.stdout_path.exists():
+            print(f"[Warn] No stdout.log found at {self.stdout_path}")
+            return {}
+            
+        try:
+             # Read full log (expensive but necessary for grep-less extraction)
+            with open(self.stdout_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            return flow_debug.parse_flow_trace(content, flow_name)
+        except Exception as e:
+            print(f"Error parsing trace: {e}")
+            return {}
 
     def get_flowid_by_logID(self, log_id) -> Optional[int]:
         name = self.get_name_by_LogID(log_id)
@@ -794,6 +820,18 @@ class ExperimentResult:
         sim_params.pop("o", None)
         sim_params.pop("tm", None)
 
+        # [Auto-Inject] 强制开启 Debug 和全量日志以支持深度诊断
+        sim_params["debug"] = True
+        sim_params["log"] = [
+            "sink",
+            "flow_events",
+            "tor_downqueue",
+            "traffic",
+            "nic",
+            "queue_usage",
+        ]
+        sim_params["logtime"] = 0.01
+
         # 提取可执行程序名
         original_cmd = data.get("command", "")
         exe = original_cmd.split()[0] if original_cmd else "htsim_uec"
@@ -807,7 +845,14 @@ class ExperimentResult:
         }
 
         # 4. 写入文件
+        # 4. 写入文件 (带注释注入)
+        yaml_str = yaml.dump(repro_config, sort_keys=False, indent=2)
+
+        # [Auto-Inject] 简单字符串替换注入注释
+        yaml_str = yaml_str.replace("debug: true", "debug: true # [Auto] Enable CWND logging")
+        yaml_str = yaml_str.replace("logtime: 0.01", "logtime: 0.01 # [Auto] High precision")
+
         with open(target_path, "w", encoding="utf-8") as f:
-            yaml.dump(repro_config, f, sort_keys=False, indent=2)
+            f.write(yaml_str)
 
         return str(target_path.resolve())

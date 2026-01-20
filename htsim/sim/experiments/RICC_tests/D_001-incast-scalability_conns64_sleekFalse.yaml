@@ -1,0 +1,37 @@
+common:
+  execute: true
+  simulation:
+    ecn: 20p 80p
+    end: 2000
+    execute: true
+    linkspeed: 100000
+    load_balancing_algo: mixed
+    log:
+    - sink
+    - flow_events
+    - tor_downqueue
+    - traffic
+    - nic
+    - queue_usage
+    logtime: 0.01 # [Auto] High precision
+    mtu: 4150
+    paths: 64
+    queue_size_bdp_factor: 8
+    queue_type: composite
+    sender_cc_algo: nscc
+    sleek: false
+    strat: ecmp_host
+    target_q_delay: 12
+    tiers: 3
+    debug: true # [Auto] Enable CWND logging
+experiments:
+- name: diag_conns64_sleekFalse
+  exe: htsim_uec
+  traffic:
+    conns: 64
+    extrastarttime: 0
+    flowsize: 50KB
+    nodes: 432
+    prefer_remote: 1
+    randseed: 4
+    type: incast

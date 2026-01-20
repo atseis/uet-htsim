@@ -54,6 +54,7 @@ class AutoVisualizer:
             "Protocol Efficiency (Payload vs Control)": self._plot_protocol_efficiency,
             "Flow Path Spatio-Temporal Heatmap": self._plot_flow_path_heatmap_auto,
             "Congestion Control Diagnostic": self._plot_cc_diagnostic_auto,
+            "Full Stack Analysis (Trace)": self._plot_flow_trace_auto,
         }
 
         # 2. 定义漏斗式阅读逻辑 (REPORT_PLAN)
@@ -91,6 +92,7 @@ class AutoVisualizer:
                 "question": "观察 cwnd 的下降是否是对队列上升的即时响应？队列排空后 cwnd 是否恢复太慢？",
                 "items": [
                     "Congestion Control Diagnostic",
+                    "Full Stack Analysis (Trace)",
                     "Incast Fan-in vs. Pressure",
                     "Bottleneck Correlation Analysis",
                     "Switch Shared Buffer Usage",
@@ -176,6 +178,9 @@ class AutoVisualizer:
         if (is_debug_enabled or has_cwnd_data) and "flow_events" in self.enabled_logs:
             active["Congestion Control Diagnostic"] = self.plotters[
                 "Congestion Control Diagnostic"
+            ]
+            active["Full Stack Analysis (Trace)"] = self.plotters[
+                "Full Stack Analysis (Trace)"
             ]
         return active
 
@@ -823,6 +828,36 @@ class AutoVisualizer:
         if target_name:
             return self._plot_cc_diagnostic(target_name)
         return None
+
+    def _plot_flow_trace_auto(self):
+        """
+        [New] 自动绘制 Full Stack Trace。
+        逻辑：同 _plot_cc_diagnostic_auto，自动寻找最慢流并绘制 Seq/RTT 图。
+        """
+        res = self.result
+        sd_df = res.flow_slowdown_df
+        target_name = None
+
+        if not sd_df.empty and not res.cwnd_df.empty:
+            sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
+            for _, row in sorted_worst.iterrows():
+                log_id = row["flow_id"]
+                name = res.idmap.get(log_id)
+                if name: # Note: Unlike CC diag, Flow Trace relies on grep from stdout, not just cwnd_df. 
+                         # But checking cwnd_df is a good proxy for "is logged".
+                    if name in res.cwnd_df["flow_name"].values:
+                        target_name = name
+                        print(f"ℹ️ [Trace] 自动锁定: {target_name} (ID: {log_id})")
+                        break
+
+        if target_name is None and not res.cwnd_df.empty:
+            target_name = res.cwnd_df["flow_name"].unique()[0]
+            print(f"ℹ️ [Trace] 兜底选择: {target_name}")
+
+        if target_name:
+            return self.plot_flow_trace(target_name)
+        return None
+
 
     def _plot_cwnd_dynamics(self, target_flow_name: str = None):
         """
@@ -1519,3 +1554,125 @@ class AutoVisualizer:
         ax.legend(loc="upper right")
 
         return fig
+
+    def plot_flow_trace(self, flow_name: str):
+        """
+        [New] Full Stack Analysis: Seq, Congestion & RTT.
+        Replicates the superior visualization from data_extraction/plot_trace.py.
+        """
+        events = self.result.get_flow_trace_data(flow_name)
+        if not events or not events["send_t"]:
+            print(f"No trace data found for {flow_name}")
+            return None
+
+        # Create Layout: 2 Subplots (Seq/CWND, Latency)
+        fig, (ax1, ax3) = plt.subplots(
+            2, 1, figsize=(16, 12), sharex=True, gridspec_kw={"height_ratios": [3, 1]}
+        )
+        
+        # === 1. Main Plot (SeqNo) ===
+        ax1.set_ylabel("Sequence Number", color="tab:blue", fontsize=12, fontweight="bold")
+        ax1.tick_params(axis="y", labelcolor="tab:blue")
+
+        # Normal Sends (Blue Dots)
+        ax1.scatter(
+            events["send_t"], events["send_seq"],
+            c="blue", alpha=0.6, s=60, label="Normal Send", edgecolors="none"
+        )
+        
+        # Retransmissions (Red Crosses)
+        if events["rtx_t"]:
+            ax1.scatter(
+                events["rtx_t"], events["rtx_seq"],
+                c="red", marker="x", s=150, linewidth=3, label="Retransmission", zorder=10
+            )
+
+        # Cumulative ACKs (Green Step)
+        if events["ack_t"]:
+             # Sort by time to ensure step plot is correct
+            sorted_acks = sorted(zip(events["ack_t"], events["ack_seq"]))
+            if sorted_acks:
+                a_t, a_s = zip(*sorted_acks)
+                ax1.step(
+                    a_t, a_s,
+                    c="green", where="post", alpha=0.7, linewidth=2.5, label="Cum ACK"
+                )
+
+        # RTO Events (Orange Dashed Lines)
+        unique_rto = sorted(list(set(events["rto_t"])))
+        for i, t in enumerate(unique_rto):
+            label = "RTO Event" if i == 0 else None
+            ax1.axvline(x=t, color="orange", linestyle="--", alpha=0.8, linewidth=2, label=label)
+
+        # === Secondary Y-axis (CWND/InFlight) ===
+        ax2 = ax1.twinx()
+        ax2.set_ylabel("Bytes (CWND / In-Flight)", color="tab:purple", fontsize=12, fontweight="bold")
+        ax2.tick_params(axis="y", labelcolor="tab:purple")
+
+        if events["cwnd_t"]:
+            sorted_cwnd = sorted(zip(events["cwnd_t"], events["cwnd_val"]))
+            c_t, c_v = zip(*sorted_cwnd)
+            ax2.plot(c_t, c_v, color="tab:purple", linestyle="-", linewidth=2, alpha=0.9, label="CWND")
+
+        if events["inflight_t"]:
+            sorted_inf = sorted(zip(events["inflight_t"], events["inflight_val"]))
+            i_t, i_v = zip(*sorted_inf)
+            ax2.plot(i_t, i_v, color="gray", linestyle=":", alpha=0.6, label="In-Flight")
+            ax2.fill_between(i_t, 0, i_v, color="gray", alpha=0.15)
+
+        # === Legend ===
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        lines_2, labels_2 = ax2.get_legend_handles_labels()
+        ax1.legend(
+            lines_1 + lines_2, labels_1 + labels_2,
+            loc="center", bbox_to_anchor=(0.5, 0.9), ncol=1,
+            frameon=True, facecolor="white", edgecolor="gray", framealpha=0.85, 
+            shadow=False, fancybox=True, fontsize=10
+        )
+        
+        ax1.grid(True, which="major", linestyle="--", alpha=0.5)
+        ax1.set_title(f"Full Stack Analysis: {flow_name}", fontsize=16, pad=20)
+
+        # === 2. Sub Plot (Latency) ===
+        ax3.set_ylabel("Latency (us)", color="tab:brown", fontsize=12, fontweight="bold")
+        ax3.set_xlabel("Time (us)", fontsize=12, fontweight="bold")
+
+        if events["rtt_t"]:
+            sorted_rtt_all = sorted(zip(events["rtt_t"], events["delay_val"], events["raw_rtt_val"]))
+            r_t, d_v, raw_v = zip(*sorted_rtt_all)
+
+            ax3.plot(r_t, raw_v, color="tab:brown", marker=".", markersize=8, linestyle="-", linewidth=1.5, alpha=0.9, label="Total RTT (Raw)")
+            ax3.plot(r_t, d_v, color="orange", linestyle="--", linewidth=1, alpha=0.6, label="Queueing Delay")
+            ax3.fill_between(r_t, 0, d_v, color="orange", alpha=0.2)
+
+            if raw_v:
+                max_raw = max(raw_v)
+                max_t = r_t[raw_v.index(max_raw)]
+                ax3.annotate(
+                    f"Max RTT: {max_raw:.2f}us",
+                    xy=(max_t, max_raw), xytext=(max_t + 50, max_raw),
+                    arrowprops=dict(facecolor="black", shrink=0.05),
+                    fontsize=10, fontweight="bold"
+                )
+                
+                # Estimate Base RTT (min of Raw - Delay)
+                # Note: delay is calc by parsed logic (raw - base). So raw - delay should be roughly base.
+                base_rtt_est = min([r - d for r, d in zip(raw_v, d_v)])
+                ax3.text(
+                    0.02, 0.9, f"Est. Base RTT ≈ {base_rtt_est:.2f}us",
+                    transform=ax3.transAxes, fontsize=10,
+                    bbox=dict(facecolor="white", alpha=0.8, edgecolor="gray", boxstyle="round")
+                )
+
+        ax3.legend(loc="upper right", facecolor="white", framealpha=0.8, edgecolor="gray")
+        ax3.grid(True, which="both", linestyle="--", alpha=0.3)
+        
+        # RTO lines on subplot too
+        for t in unique_rto:
+            ax3.axvline(x=t, color="orange", linestyle="--", alpha=0.4)
+
+        # Format X Axis
+        ax3.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
+        
+        return fig
+
