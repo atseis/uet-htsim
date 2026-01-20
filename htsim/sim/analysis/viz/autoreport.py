@@ -1518,20 +1518,62 @@ class AutoVisualizer:
                 facecolors="none",
                 edgecolors="red",
             )
-        # ACKs
+        # ACKs (Cumulative Line)
         if events["ack_t"]:
             sorted_acks = sorted(zip(events["ack_t"], events["ack_seq"]))
             if sorted_acks:
                 a_t, a_s = zip(*sorted_acks)
                 ax1.step(
-                    a_t,
-                    a_s,
-                    c="green",
-                    where="post",
-                    alpha=0.7,
-                    linewidth=2,
-                    label="Cum ACK",
+                    a_t, a_s,
+                    c="green", where="post", alpha=0.5, linewidth=2, label="Cum ACK Line"
                 )
+                
+                # [New] Generate Individual ACK Points (Green Solid Circle) - Deduplicated
+                # Goal: Mark each packet as ACKed exactly once, at the *earliest* time the Sender knows it.
+                
+                confirmed_seqs = set()
+                ack_events = [] # List of (time, seq, type)
+                
+                # 1. Collect SACKs (Explicit)
+                if "sack_t" in events and events["sack_t"]:
+                    for t, s in zip(events["sack_t"], events["sack_seq"]):
+                        ack_events.append((t, s, 'sack'))
+                
+                # 2. Collect Cum ACKs (Implicit Range)
+                sorted_valid_acks = sorted(zip(events["ack_t"], events["ack_seq"]))
+                if sorted_valid_acks:
+                     prev_s = sorted_valid_acks[0][1]
+                     # We can only infer new ACKs if the cum_ack increases.
+                     # We don't know the initial state before the first log, so we start from the first log.
+                     
+                     for t, s in sorted_valid_acks:
+                         if s > prev_s:
+                             # Range [prev_s, s) are newly cumulatively acked
+                             for seq_k in range(prev_s, s):
+                                 ack_events.append((t, seq_k, 'cum'))
+                             prev_s = s
+                         elif s < prev_s:
+                             # Reordering or weird log? Ignore regression for ACK generation to be safe.
+                             pass
+                
+                # 3. Sort all events by time to find the earliest confirmation
+                ack_events.sort(key=lambda x: x[0])
+                
+                plot_t = []
+                plot_s = []
+                
+                for t, seq, _ in ack_events:
+                    if seq not in confirmed_seqs:
+                        confirmed_seqs.add(seq)
+                        plot_t.append(t)
+                        plot_s.append(seq)
+                
+                if plot_t:
+                    ax1.scatter(
+                        plot_t, plot_s,
+                        c="green", marker="o", s=40, alpha=0.8, edgecolors="none", label="Packet ACKed", zorder=15
+                    )
+
         # RTO Lines (Show on all plots)
         unique_rto = sorted(list(set(events["rto_t"])))
         for i, t in enumerate(unique_rto):

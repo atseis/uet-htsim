@@ -27,6 +27,7 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
         "send_t": [], "send_seq": [],
         "rtx_t": [], "rtx_seq": [],
         "ack_t": [], "ack_seq": [],
+        "sack_t": [], "sack_seq": [],  # [New] SACK events
         "rto_t": [],
         "cwnd_t": [], "cwnd_val": [],
         "inflight_t": [], "inflight_val": [],
@@ -45,6 +46,11 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
     # ACK: "At 720.5 ... processAck cum_ack: 5 ..."
     p_ack = re.compile(r"At ([\d\.]+)\s+.*processAck.*cum_ack:\s*(\d+)")
     
+    # SACK: "    Sack 10 flow Uec_304_0"
+    # Note: SACK logs often appear after the main processAck line w/ timestamp.
+    # We need to capture the indentation and format.
+    p_sack = re.compile(r"\s+Sack (\d+)")
+
     # RTO: "rtx timer expired ... now time is 703.9" 
     # Usually log has Flow Name associated? "flow Uec_304_0"
     p_rto = re.compile(r".*rtx timer expired.*now time is ([\d\.]+)")
@@ -58,6 +64,8 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
 
     # RTT info: "At ... delay 12.5 ... raw rtt 124.5"
     p_rtt_info = re.compile(r"At ([\d\.]+)\s+.*delay ([\d\.]+).*raw rtt (\d+)")
+
+    last_ack_time = None
 
     lines = log_content.splitlines()
     for line in lines:
@@ -94,9 +102,21 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
         m_ack = p_ack.search(line)
         if m_ack:
             try:
-                events["ack_t"].append(float(m_ack.group(1)))
-                events["ack_seq"].append(int(m_ack.group(2)))
+                t = float(m_ack.group(1))
+                seq = int(m_ack.group(2))
+                events["ack_t"].append(t)
+                events["ack_seq"].append(seq)
+                last_ack_time = t # Update context for subsequent SACKs
             except ValueError: pass
+        
+        # --- Parse SACK ---
+        if "Sack" in line and last_ack_time is not None:
+             m_sack = p_sack.search(line)
+             if m_sack:
+                 try:
+                     events["sack_t"].append(last_ack_time)
+                     events["sack_seq"].append(int(m_sack.group(1)))
+                 except ValueError: pass
 
         # --- Parse RTO ---
         m_rto = p_rto.search(line)
