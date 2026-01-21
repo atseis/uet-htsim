@@ -1542,7 +1542,7 @@ class AutoVisualizer:
                 # 2. Collect Cum ACKs (Implicit Range)
                 sorted_valid_acks = sorted(zip(events["ack_t"], events["ack_seq"]))
                 if sorted_valid_acks:
-                     prev_s = sorted_valid_acks[0][1]
+                     prev_s = 0 # Initialize to 0 to capture the first ACK segment (including Seq 0)
                      # We can only infer new ACKs if the cum_ack increases.
                      # We don't know the initial state before the first log, so we start from the first log.
                      

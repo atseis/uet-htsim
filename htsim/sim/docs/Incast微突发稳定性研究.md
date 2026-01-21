@@ -154,22 +154,24 @@ CDF 曲线显示了一个极其陡峭的长尾。P99 (457us) 和 Max (732us) 之
 *图8：拥塞事件（Trim）在时间轴上的密集爆发。*
 所有的拥塞事件都集中在模拟的最前端（20-80us）。这证实了 **Micro-burst（微突发）** 的特征：极短时间内的极高强度冲击。系统没有“喘息”的机会来调整 Rate。
 
-##### 3.3.6.4. 记账死锁与 RTO 破局 (Accounting Deadlock & RTO Breakout)
+##### 3.3.6.4. 核心矛盾：反馈脆弱性与记账僵局 (Feedback Fragility & Deadlock)
 
 ![CWND Trace](.assets/fig9_conns64_full_stack_trace.png)
 *图9：受害流 (Flow 9098) 的 CWND 变化与完整状态轨迹。*
 
-这是一个教科书式的 **通过 RTO 跳出记账死锁** 的案例：
+这是一个教科书式的 **通过 RTO 跳出记账死锁** 的案例，其根因并非文档此前猜测的“SACK 不敏感”，而是**反馈信号的脆弱性**：
 
 1. **0-50us**: 初始爆发阶段。CWND 维持在高位（~250KB），数据包（Pkt 0-13）快速发出。
 2. **50us+**: 遭遇 Incast 冲击。Switch 开始产生 Physical TRIM（橘色三角），Pkt 5 和 Pkt 6 被裁剪。CWND 被拥塞算法强制压制到 **1 MSS** (4.1KB)。
-3. **100-700us**: **进入记账死锁 (Accounting Deadlock)**。
-    - 接收端发回了 Pkt 7, 8, 9, 12 的 SACK（绿色实心点）。
-    - **关键**：由于 CumAck 被 Pkt 5 的空洞堵住，Source 端的 `_in_flight`（灰色阴影区）始终处于高位（~24KB），远超目前的 `cwnd` (4.1KB)。
-    - 发送端认为管道已满（in_flight > cwnd），即使收到了 NACK/SACK 也不敢发出任何重传包。
-4. **700us**: **RTO 破局**。重传计时器超时（黄色虚线），强制触发 Pkt 5 的重传（红色空心圆），并手动清理 `in_flight` 状态。
-5. **700us+**: Pkt 5 到达后 CumAck 瞬间推进，后续重传顺利进行，流最终完成。
-**“一着不慎，满盘皆输”**：一旦在 Incast 早期触雷并形成空洞，在 1-MSS 窗口与 SACK-Ignorant 记账的双重作用下，流就会陷入死锁。
+3. **100-700us**: **进入逻辑死锁 (Logic Deadlock)**。
+    - **机制确认**：代码审计 (`uec.cpp`) 证实 `_in_flight` 实际上是 **SACK-aware** 的，它会根据 ACK 中携带的 `recvd_bytes` 实时扣减。
+    - **反馈丢失 (Feedback Loss)**：但在 Flow 9098 的案例中，Pkt 5 和 6 产生的 TRIM 反馈（NACK）中，Seq 6 对应的 NACK 在回程中丢失。
+    - **幽灵数据包 (Ghost Packet)**：由于丢失了该 NACK，Seq 6 对应的 1 MSS 负载一直“幽灵般”残留在发送端的 `_in_flight` 计数器中。
+    - **窗口封锁**：由于 `cwnd` 已被压死在 **1 MSS**，而 `in_flight` 此时也为 1 MSS，导致 `can_send_NSCC` 检查判定 `cwnd < in_flight + 1_MSS` 永远为假。发送端认为窗口已满，拒绝发出任何后续包（如 Pkt 7 之后的数据）或重传包。
+4. **700us**: **RTO 破局**。重传计时器超时（黄色虚线），强制触发 `mark_packet_for_retransmission`。该函数**显式递减** `_in_flight` 并将 Seq 6 重新排队，从而瞬间释放了被占用的窗口。
+5. **700us+**: 窗口打开后，Pkt 5 到达使得 CumAck 推进，后续重传顺利进行。
+
+**结论**：死锁的本质是 **“反馈信号丢失”** 与 **“极小窗口检查”** 的碰撞。
 
 ##### 3.3.6.5. 逐跳轨迹 (Detailed Path Trace)
 
@@ -183,24 +185,22 @@ CDF 曲线显示了一个极其陡峭的长尾。P99 (457us) 和 Max (732us) 之
 
 ##### 3.3.6.6. 根因深挖：实现层面的逻辑死锁 (Implementation Deadlock)
 
-经过对 `uec.cpp` 源码的深度审计及与 UEC 1.0 规范的对比以及 3.3.6.4 节的实验结果，确认 700us 停顿的本质并非算法设计问题，而是**实现层面的逻辑死锁**。该死锁由三个耦合的缺陷组成：
+经过对 `uec.cpp` 源码的深度审计，确认 700us 停顿的本质是 **反馈机制的非鲁棒性** 与 **恢复门槛的静态缺陷** 共同导致的“系统僵死”。
 
 **1. 窗口钳制 (1-MSS Window Muzzle)**
-在 Incast 爆发时，`quick_adapt` 机制将 `cwnd` 压制到最小的 `1 MSS` (4160 bytes)。这意味着只要有超过 1 个包在“ flight”状态，发送端就会关门。
+在 Incast 爆发时，`quick_adapt` 机制将 `cwnd` 压制到最小的 `1 MSS`。这使得发送端对 `_in_flight` 的容错率降为零：任何 1 字节的记账偏差都会锁死发送。
 
-**2. 记账脱节 (SACK-Ignorant Accounting)**
-源码中的 `_in_flight` 计数器更新逻辑极度原始：
-- **缺陷**：收到 SACK 时（`handleAckno`），代码仅清理记录但**不减少** `_in_flight` 数值。
-- **后果**：空洞之后的包（Pkt 7-12）变成了“死重（Deadweight）”。尽管接收端已确认收到，但在发送端眼里，它们依然占据着窗口位置。
+**2. 记账漂移 (Accounting Drift due to Feedback Loss)**
+`_in_flight` 计数器是 **Event-Driven（事件驱动）** 的。虽然它支持 SACK，但强依赖于 NACK/ACK 信号的到达。
+- **缺陷**：在极度拥塞的 Incast 路径上，反向路径的反馈包（NACK）也可能丢失。
+- **后果**：丢失一个 NACK 等同于丢失了“释放窗口”的凭证。在 `cwnd = 1 MSS` 下，这构成了永久性的窗口占用。
 
-**3. 阈值盲区 (Threshold Blindness in SLEEK/Recovery)**
-代码中负责快速恢复的机制名为 **SLEEK**（对应规范的 Loss Recovery），其逻辑如下：
-- **触发门槛**：要求乱序包数量 `ooo >= 3`（或 `1.5 * cwnd`）。
-- **致命悖论**：在极度拥塞时，`cwnd=1`。发送端受限于窗口只能发 1 个包，因此永远无法在接收端产生 3 个乱序包的反馈，导致 **Recovery 模式永远无法激活**。
+**3. SLEEK 机制的“盲点” (SLEEK Threshold Blindness)**
+UEC 的 Loss Recovery 机制（代码代号 SLEEK）在关键时刻失灵了：
+- **阈值过高**：`runSleek` 要求乱序空隙 `ooo >= 5` 个包（代码中 `min_retx_config = 5`）。在 Flow 9098 的案例中，丢失包很少且后续包被窗口锁死无法发出，导致 `ooo` 永远达不到触发阈值。
+- **探针失效 (Probe High-RTT Rejection)**：SLEEK 包含探针机制，但 `processAck` 中规定只有当探针延迟 `delay < target_Qdelay` 时才激活 Recovery。在 Incast 拥塞时，探针 RTT 极高，导致即使探针成功返回，发送端也拒绝进入恢复模式。
 
-**死锁场景复现**：
-> `in_flight` (24KB) >> `cwnd` (4KB) 且处于 `Normal Mode` (无法绕过窗口检查)。
-> 即使收到 NACK/TRIM，重传指令也会被 `can_send_NSCC` 检查拦截。系统失去所有事件驱动能力，陷入死寂。
+**结论**：本次 RTO 事故是由于 **“SACK-Aware 但反馈不鲁棒”** 的记账逻辑，配合 **“固定阈值的快速重传”** 在极小窗口场景下发生碰撞导致的“逻辑停摆”。
 
 ##### 3.3.6.7. SLEEK 机制内涵与规范一致性
 
@@ -304,7 +304,7 @@ CDF 曲线显示了一个极其陡峭的长尾。P99 (457us) 和 Max (732us) 之
 ### 6.3 现状盘点 (Current Status)
 
 - **Done**:
-  - [x] **根因定罪**: 确认了“SACK 记账死锁”与“SLEEK 阈值盲区”的互锁问题。
+  - [x] **根因定罪**: 驳回了“SACK 忽略”论点，确认为“反馈丢失造成的幽灵包死锁”与“SLEEK/Probe 恢复盲区”的互锁问题。
   - [x] **物理定性**: 证明了 Buffer 扩容对 Incast 抑制的边际效应递减至零。
   - [x] **规范对齐**: 确认 SLEEK 逻辑符合 UEC 1.0 Spec 但在极端场景下需要实现补丁。
 - **In Progress**:
