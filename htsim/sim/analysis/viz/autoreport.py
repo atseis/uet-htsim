@@ -1504,6 +1504,66 @@ class AutoVisualizer:
             label="Normal Send",
             edgecolors="none",
         )
+
+        # [New] AR Flag Visualization (Yellow Star Context)
+        if "send_ar" in events and any(events["send_ar"]):
+            ar_indices = [i for i, x in enumerate(events["send_ar"]) if x == 1]
+            if ar_indices:
+                ar_t = [events["send_t"][i] for i in ar_indices]
+                ar_seq = [events["send_seq"][i] for i in ar_indices]
+                ax1.scatter(
+                    ar_t,
+                    ar_seq,
+                    c="red",       # Changed from gold to red for visibility
+                    marker="*",
+                    s=200,         # Increased size
+                    alpha=1.0,     # Full opacity
+                    label="Packet with AR Flag",
+                    zorder=20,     # Verified on top of everything
+                    edgecolors="black", # Add border for contrast
+                )
+
+        # [New] Sink Reception (Physical Arrival from Traffic Log)
+        # More robust: Look for DEPART from the Last-Hop Pipe (e.g. "Pipe-LS0->DST0")
+        if not traffic_data.empty and "name" in traffic_data.columns:
+            # Filter for DEPART events from Pipes connected to Destination
+            sink_arrivals = traffic_data[
+                (traffic_data["event"] == "DEPART") & 
+                (traffic_data["name"].str.contains("Pipe", na=False)) &
+                (traffic_data["name"].str.contains("DST", na=False))
+            ]
+            
+            # Map time to us
+            if not sink_arrivals.empty:
+                sink_t = sink_arrivals["time"] * 1e6
+                sink_seq = sink_arrivals["pkt_id"]
+                
+                ax1.scatter(
+                    sink_t,
+                    sink_seq,
+                    c="purple",
+                    marker="D",
+                    s=30,
+                    alpha=0.6,
+                    label="Physical Arrival (Sink)",
+                    zorder=12,
+                    edgecolors="none",
+                )
+        
+        # Fallback to log-based if traffic log missing (optional)
+        elif events.get("recv_t"):
+            ax1.scatter(
+                events["recv_t"],
+                events["recv_seq"],
+                c="purple",
+                marker="D",
+                s=30,
+                alpha=0.6,
+                label="Log Recv (Sink)",
+                zorder=12,
+                edgecolors="none",
+            )
+
         # Retransmissions
         if events["rtx_t"]:
             ax1.scatter(

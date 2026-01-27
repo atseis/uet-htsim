@@ -632,6 +632,47 @@ class BatchResult:
         # 1. 获取包含核心指标的汇总表
         metrics = ["p99_fct", "median_fct", "max_fct", "max_drop_rate"]
         df = self.get_summary_df(metrics)
+        # ...
+
+    def scan_for_deadlocks(self) -> pd.DataFrame:
+        """
+        [New] 扫描批量实验中是否存在 "Silent Packet Deadlock" 问题。
+        调用 ExperimentResult.diagnose_deadlock() 并汇总。
+        """
+        all_issues = []
+        
+        print(f"Scanning {len(self.experiments)} experiments for deadlocks...")
+        
+        for uid, entry in self.experiments.items():
+            res = entry['result']
+            issues = res.diagnose_deadlock()
+            
+            if issues:
+                for issue in issues:
+                    # Flatten info for DataFrame
+                    row = {
+                        "_uid": uid,
+                        "FlowID": issue['flow_id'],
+                        "Time_us": issue['time'],
+                        "Details": issue['details'],
+                        "Type": issue['type'],
+                        **res.params # Include experiment params for context
+                    }
+                    all_issues.append(row)
+        
+        if not all_issues:
+            print("🎉 No silent deadlocks detected in this batch.")
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(all_issues)
+        print(f"⚠️ Found {len(df)} deadlock events across {df['_uid'].nunique()} experiments.")
+        
+        # Reorder columns to put critical info first
+        cols = ["_uid", "Type", "Time_us", "FlowID", "Details"] 
+        # Append other param columns (excluding internal ones)
+        other_cols = [c for c in df.columns if c not in cols and not c.startswith("_")]
+        
+        return df[cols + other_cols]
         if df.empty:
             return pd.DataFrame()
 

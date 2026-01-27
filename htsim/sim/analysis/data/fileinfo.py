@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Dict, Union, Optional, List
+from typing import Dict, Union, Optional, List, Any
 from functools import cached_property
 import pandas as pd
 import numpy as np
@@ -856,3 +856,22 @@ class ExperimentResult:
             f.write(yaml_str)
 
         return str(target_path.resolve())
+
+    def diagnose_deadlock(self) -> List[Dict]:
+        """
+        [New] Run the specific UEC Slient Packet Deadlock diagnosis.
+        Returns a list of detected issues (dicts).
+        """
+        from .. import diagnose_deadlock
+        
+        if not self.log_path.exists() or not self.stdout_path.exists():
+            return []
+            
+        try:
+            return diagnose_deadlock.check_deadlock_issues(
+                self.log_path.as_posix(), 
+                self.stdout_path.as_posix()
+            )
+        except Exception as e:
+            print(f"[Diagnose Error] {self.base_dir.name}: {e}")
+            return []

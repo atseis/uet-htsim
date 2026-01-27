@@ -24,10 +24,11 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
         }
     """
     events = {
-        "send_t": [], "send_seq": [],
+        "send_t": [], "send_seq": [], "send_ar": [], # [New] Added send_ar
         "rtx_t": [], "rtx_seq": [],
         "ack_t": [], "ack_seq": [],
         "sack_t": [], "sack_seq": [],  # [New] SACK events
+        "recv_t": [], "recv_seq": [],  # [New] Sink events
         "rto_t": [],
         "cwnd_t": [], "cwnd_val": [],
         "inflight_t": [], "inflight_val": [],
@@ -88,6 +89,14 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
             try:
                 events["send_t"].append(float(m_send.group(1)))
                 events["send_seq"].append(int(m_send.group(2)))
+                
+                # [New] Parse AR Flag (ACK Request)
+                # Matches "ack request 1" or "ar 1"
+                m_ar = re.search(r"(?:ack request|ar)\s+(\d)", line)
+                if m_ar:
+                     events["send_ar"].append(int(m_ar.group(1)))
+                else:
+                     events["send_ar"].append(0) # Default to 0 if not found
             except ValueError: pass
 
         # --- Parse RTX ---
@@ -116,6 +125,18 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
                  try:
                      events["sack_t"].append(last_ack_time)
                      events["sack_seq"].append(int(m_sack.group(1)))
+                 except ValueError: pass
+
+        # --- Parse Recv (Sink) ---
+        # Look for "recv X" in lines associated with this flow
+        # Regex: `... recv (\d+) ...` (simple) or `... recv\s+(\d+)`
+        # We rely on timestamp being at start of line for HTSim logs: `703.9 ...`
+        if "recv" in line:
+             m_recv = re.search(r"([\d\.]+)\s+.*recv\s+(\d+)", line)
+             if m_recv:
+                 try:
+                     events["recv_t"].append(float(m_recv.group(1)))
+                     events["recv_seq"].append(int(m_recv.group(2)))
                  except ValueError: pass
 
         # --- Parse RTO ---

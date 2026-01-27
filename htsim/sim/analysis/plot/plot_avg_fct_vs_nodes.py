@@ -218,8 +218,10 @@ def plot_avg_fct_vs_nodes(experiment_results_dir: Path):
         )
 
     plt.title(plot_options["title"])
-    plt.xlabel(f"{plot_options["x_label"]}{f' ({plot_options["x_unit"]})' if plot_options["x_unit"] else ''}")
-    plt.ylabel(f"{plot_options["y_label"]}{f' ({y_unit})' if y_unit else ''}") # Use the already formatted y_label
+    xlabel_unit = f" ({plot_options['x_unit']})" if plot_options.get('x_unit') else ""
+    plt.xlabel(f"{plot_options['x_label']}{xlabel_unit}")
+    ylabel_unit = f" ({y_unit})" if y_unit else ""
+    plt.ylabel(f"{plot_options['y_label']}{ylabel_unit}")
 
     if plot_options["x_range_manual"]:
         plt.xlim(plot_options["x_range_manual"])
