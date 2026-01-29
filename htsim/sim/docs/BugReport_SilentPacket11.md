@@ -246,5 +246,31 @@ HTSim **没有实现 Timer**，却采用了“不回 ACK”的策略，这是**�
 在 `UecSink::processData` 的乱序处理分支（`else` 块）中补全逻辑：
 1.  **[Existing]** 更新 `_epsn_rx_bitmap` 和计数器。
 2.  **[New]** 添加 `force_ack = true;`。
-   *   这确保了只要发生乱序，Sink 就会立即发送带有最新 SACK Block 的 ACK。
-   *   这不仅打破了死锁，也符合快速重传（Fast Retransmit）的需要——让发送端尽早知道有包丢失。
+
+## 4. 深度根因分析 (Deep Root Cause Analysis)
+
+### 4.1 活锁放大效应 (Livelock Amplification)
+为何网络进入死锁后，不仅没有静默，反而产生了高达 100Gbps 的 TRIM 流量？
+*   **Packet Conservation Loop**:
+    *   发送端收到 NACK 时，`_in_flight` 减小（包离开网络），同时 `_cwnd` 减小（拥塞控制）。
+    *   这两个减量相互抵消，使得 `In_Flight` 依然不大于 `CWND`，允许发送端**立即队列重传**。
+*   **Min-CWND 陷阱**:
+    *   即使 CWND 降至最低（1 MTU），96 个并发流意味着全网有 96 个包在循环。
+    *   对于拥塞瓶颈，96 个包足以再次触发 Queue Full -> TRIM。
+*   **结果**: 形成 `Send -> Trim -> Nack -> Resend -> Trim` 的无限高速空转，产生图中的红色废流量。
+
+### 4.2 可视化误导澄清 (Visualization Artifacts)
+*   **Protocol Efficiency 图异常高值**:
+    *   数值高达 50,000/10us，是因为统计的是**全网 Event 总数**（每跳产生 Arrive/Depart 事件），而非 Unique Packet 数。
+    *   在 Livelock 产生的高频小包风暴中，这一数值在数学上是合理的。
+*   **NIC Traffic 图全红**:
+    *   代表 **100% Trimmed**。NIC 此时收到的全是只有头部的包。
+
+### 4.3 Probe 优先级缺陷 (Probe Priority Flaw)
+*   **现状**: `UecDataPacket` 逻辑中，Probe 包 (`DATA_PROBE`) 被标记为 `_is_header = false`。
+*   **后果**: 尽管交换机实现了高优先级队列（给 Header），Probe 却被错误地放入了低优先级数据队列。
+*   **影响**: 在 Incast 拥塞（Buffer 被数据包填满）时，本应救援的 Probe 包也被丢弃，导致死锁无法通过 SLEEK 机制自行恢复。
+
+## 5. 修复建议 (Fix Proposals)
+1.  **[必选] Receiver Fix**: 在 `UecSink::processData` 中，当填补空洞（Hole Filling）时强制 `force_ack = true`。这是打破死锁的根本方法。
+2.  **[可选] Probe Priority**: 修改 `uecpacket.h`，将 Probe 包标记为高优先级，提升其在拥塞下的生存能力。

@@ -800,7 +800,7 @@ class AutoVisualizer:
             plot_df["time"],
             plot_df[data_col],
             plot_df[trim_col],
-            labels=["Valid Data", "Trimmed/Dropped"],
+            labels=["Valid Data", "Trimmed"],
             colors=["#2ca02c", "#d62728"],
             alpha=0.8,
         )
@@ -1299,7 +1299,7 @@ class AutoVisualizer:
 
         ax.set_title("Protocol Efficiency: Data vs. Control Packets")
         ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Packet Count")
+        ax.set_ylabel("Event Count")
         ax.xaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_plain))
         ax.grid(True, ls="--", alpha=0.3)
 

@@ -607,6 +607,9 @@ class BatchResult:
 
         df = pd.DataFrame(suggestions)
         
+        # 确保显示完整内容不被截断 (Fix: prevent truncation ...)
+        pd.set_option('display.max_colwidth', None)
+
         # 使用 Styler 使得换行符 \n 能够被正确渲染 (Jupyter Lab/Notebook)
         # 如果缺少 jinja2，Pandas 会抛出 AttributeError
         try:
