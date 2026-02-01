@@ -24,7 +24,7 @@ common:
     target_q_delay: 12
     tiers: 3
     debug: true # [Auto] Enable CWND logging
-    debug_flowid: 26
+    debug_flowid: 58
 experiments:
 - name: diag_conns96_sleekTrue
   exe: htsim_uec

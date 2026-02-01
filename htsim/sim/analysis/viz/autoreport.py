@@ -1528,7 +1528,9 @@ class AutoVisualizer:
         probe_y = max_seq * 1.05 if max_seq > 0 else 100
 
         # --- Plot Probes (Top Channel) ---
+        # --- Plot Probes (Top Channel) ---
         if events.get("probe_t"):
+            # Plot Probe Sends
             ax1.scatter(
                 events["probe_t"],
                 [probe_y] * len(events["probe_t"]),
@@ -1539,7 +1541,7 @@ class AutoVisualizer:
                 label="Probe Send",
                 zorder=30,
             )
-            # Annotate
+            # Annotate Sends
             for t, seq in zip(events["probe_t"], events["probe_seq"]):
                 ax1.text(
                     t,
@@ -1549,6 +1551,40 @@ class AutoVisualizer:
                     fontsize=8,
                     ha="center",
                 )
+
+        # Plot Probe Arrivals (From Stdout Log)
+        if events.get("probe_recv_t"):
+            ax1.scatter(
+                events["probe_recv_t"],
+                [probe_y] * len(events["probe_recv_t"]),
+                marker="o", # Hollow circle
+                s=40,
+                facecolors="magenta", # Solid magenta for Arrival (or verify user pref)
+                edgecolors="none", # Let's use solid for arrival to distinguish? Or consistent?
+                # User asked for: "Probe Send" (hollow/solid?) -> previous was Send=Solid Blue.
+                # Let's stick to: Send=Hollow Magenta, Arrival=Solid Magenta for clear pair.
+                label="Probe Arrival",
+                zorder=30,
+            )       
+
+            # Draw lines between Probe Send and Arrival
+            # Match by Sequence Number
+            if events.get("probe_t") and events.get("probe_seq"):
+                send_map = dict(zip(events["probe_seq"], events["probe_t"]))
+                
+                for t_arr, seq_arr in zip(events["probe_recv_t"], events["probe_recv_seq"]):
+                    if seq_arr in send_map:
+                        t_send = send_map[seq_arr]
+                        # Draw line
+                        ax1.plot(
+                            [t_send, t_arr],
+                            [probe_y, probe_y],
+                            color="magenta",
+                            linestyle="-",
+                            linewidth=0.5,
+                            alpha=0.5,
+                            zorder=29
+                        )
 
         # --- Plot Normal Sends (Filtered) ---
         # Heuristic: If we have traffic_data, filter by size.

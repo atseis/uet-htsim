@@ -2565,6 +2565,12 @@ void UecSink::handlePullTarget(UecBasePacket::seq_t pt) {
 void UecSink::processData(UecDataPacket& pkt) {
     bool force_ack = false;
     if (pkt.packet_type() == UecBasePacket::DATA_PROBE) {
+        if (pkt.flow().flow_id() == UecSrc::_debug_flowid) {
+            cout << timeAsUs(_src->eventlist().now()) << " flowid " << pkt.flow().flow_id()
+                 << " receiveProbe "
+                 << " _probe_seqno " << pkt.epsn() << endl;
+        }
+
         UecAckPacket* ack_packet = sack(pkt.path_id(), sackBitmapBase(pkt.epsn()), pkt.epsn(),
                                         (bool)(pkt.flags() & ECN_CE), pkt.retransmitted());
         ack_packet->set_probe_ack(true);

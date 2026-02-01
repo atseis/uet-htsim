@@ -28,7 +28,8 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
         "rtx_t": [], "rtx_seq": [],
         "ack_t": [], "ack_seq": [],
         "sack_t": [], "sack_seq": [],
-        "probe_t": [], "probe_seq": [], # [New] Probe events
+        "probe_t": [], "probe_seq": [], 
+        "probe_recv_t": [], "probe_recv_seq": [], # [New] Probe Arrival
         "recv_t": [], "recv_seq": [],
         "rto_t": [],
         "cwnd_t": [], "cwnd_val": [],
@@ -45,6 +46,10 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
     # Probe: "703.9 flowid 102 sendProbe _probe_seqno 1"
     # Matches: time, flowid (ignored), seqno
     p_probe = re.compile(r"([\d\.]+)\s+.*sendProbe.*_probe_seqno\s+(\d+)")
+
+    # Probe Receive: "703.9 flowid 102 receiveProbe _probe_seqno 1"
+    # Matches: time, seqno
+    p_probe_recv = re.compile(r"([\d\.]+)\s+.*receiveProbe.*_probe_seqno\s+(\d+)")
 
     # RTX: "717.9 Uec_304_0 ... sending rtx pkt 6 ..."
     p_rtx = re.compile(r"([\d\.]+)\s+.*sending rtx pkt (\d+)")
@@ -135,6 +140,14 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
                     events["probe_t"].append(float(m_probe.group(1)))
                     events["probe_seq"].append(int(m_probe.group(2)))
                 except ValueError: pass
+
+        # --- Parse Probe Receive ---
+        m_probe_recv = p_probe_recv.search(line)
+        if m_probe_recv:
+            try:
+                events["probe_recv_t"].append(float(m_probe_recv.group(1)))
+                events["probe_recv_seq"].append(int(m_probe_recv.group(2)))
+            except ValueError: pass
 
         # --- Parse RTX ---
         m_rtx = p_rtx.search(line)
