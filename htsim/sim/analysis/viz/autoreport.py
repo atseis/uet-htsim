@@ -710,29 +710,48 @@ class AutoVisualizer:
         res = self.result
         sd_df = res.flow_slowdown_df
         target_name = None
+        target_iid = None
 
         if not sd_df.empty and not res.cwnd_df.empty:
             # 1. 优先找最惨的流
             sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
             for _, row in sorted_worst.iterrows():
-                log_id = row["flow_id"]
-                name = res.idmap.get(log_id)
+                internal_id = row["flow_id"]
+                name = res.idmap.get(internal_id)
                 # 必须确保名字能对应到 stdout.log 里的数据
                 if name and name in res.cwnd_df["flow_name"].values:
                     target_name = name
-                    print(f"ℹ️ [Trace] 自动锁定最惨流: {target_name} (ID: {log_id})")
+                    target_iid = internal_id
+                    # print(f"ℹ️ [Trace] 自动锁定最惨流: {target_name} (LogID: {int(target_iid)})")
                     break
 
         if target_name is None and not res.cwnd_df.empty:
             target_name = res.cwnd_df["flow_name"].unique()[0]
-            print(f"ℹ️ [Trace] 兜底选择: {target_name}")
+            # Try to resolve ID
+            if hasattr(res, "get_internal_flow_id"):
+                target_iid = res.get_internal_flow_id(target_name)
+
+            # Retrieve SrcID from parsed events if possible
+            # We need to peek into the events, but we don't have them yet here?
+            # Wait, plot_flow_trace calls get_flow_trace_data which uses parse_flow_trace.
+            # We can't see SrcID easily here without parsing again or just plotting.
+            # BUT, we can just print LogID here.
+            # print(f"ℹ️ [Trace] 兜底选择: {target_name} (LogID: {int(target_iid) if target_iid is not None else 'N/A'})")
 
         if target_name:
-            return self.plot_flow_trace(target_name)
-        return None
+            # [Optimization] Pre-fetch events to extract InternalID for logging
+            events = res.get_flow_trace_data(target_name)
+            internal_id_val = (
+                events.get("internal_id", [None])[0]
+                if events and events.get("internal_id")
+                else "N/A"
+            )
 
-        if target_name:
-            return self.plot_flow_trace(target_name)
+            print(
+                f"ℹ️ [Trace] 自动锁定最惨流: {target_name} (LogID: {int(target_iid) if target_iid is not None else 'N/A'}, InternalID: {internal_id_val})"
+            )
+
+            return self.plot_flow_trace(target_name, preloaded_events=events)
         return None
 
     def _plot_cwnd_dynamics(self, target_flow_name: str = None):
@@ -1431,7 +1450,7 @@ class AutoVisualizer:
 
         return fig
 
-    def plot_flow_trace(self, flow_name: str):
+    def plot_flow_trace(self, flow_name: str, preloaded_events: dict = None):
         """
         [Final Merged] Full Stack Analysis: Protocol + Network + Latency.
         融合了原有的 Sequence 视图和 Congestion Diagnostic 视图，
@@ -1441,7 +1460,11 @@ class AutoVisualizer:
         3. Latency: Split RTT (Prop vs Queue)
         """
         res = self.result
-        events = self.result.get_flow_trace_data(flow_name)
+        if preloaded_events:
+            events = preloaded_events
+        else:
+            events = self.result.get_flow_trace_data(flow_name)
+
         if not events or not events["send_t"]:
             print(f"No trace data found for {flow_name}")
             return None
@@ -1494,7 +1517,45 @@ class AutoVisualizer:
         )
         ax1.tick_params(axis="y", labelcolor="tab:blue")
 
-        # Sends
+        # --- [New] Separate Probe Channel Calculation ---
+        max_seq = 0
+        if events["send_seq"]:
+            max_seq = max(max_seq, max(events["send_seq"]))
+        if events["recv_seq"]:
+            max_seq = max(max_seq, max(events["recv_seq"]))
+
+        # Probe Channel Y-position (Top of graph)
+        probe_y = max_seq * 1.05 if max_seq > 0 else 100
+
+        # --- Plot Probes (Top Channel) ---
+        if events.get("probe_t"):
+            ax1.scatter(
+                events["probe_t"],
+                [probe_y] * len(events["probe_t"]),
+                marker="o",
+                s=40,
+                facecolors="none",
+                edgecolors="magenta",
+                label="Probe Send",
+                zorder=30,
+            )
+            # Annotate
+            for t, seq in zip(events["probe_t"], events["probe_seq"]):
+                ax1.text(
+                    t,
+                    probe_y * 1.02,
+                    f"P{seq}",
+                    color="magenta",
+                    fontsize=8,
+                    ha="center",
+                )
+
+        # --- Plot Normal Sends (Filtered) ---
+        # Heuristic: If we have traffic_data, filter by size.
+        # If not, use events["send_t"] which comes from stdout regex ("sending pkt").
+        # As determined, stdout regex "sending pkt" excludes "sendProbe".
+        # So events["send_seq"] should be clean.
+
         ax1.scatter(
             events["send_t"],
             events["send_seq"],
@@ -1514,13 +1575,13 @@ class AutoVisualizer:
                 ax1.scatter(
                     ar_t,
                     ar_seq,
-                    c="red",       # Changed from gold to red for visibility
+                    c="red",  # Changed from gold to red for visibility
                     marker="*",
-                    s=200,         # Increased size
-                    alpha=1.0,     # Full opacity
+                    s=200,  # Increased size
+                    alpha=1.0,  # Full opacity
                     label="Packet with AR Flag",
-                    zorder=20,     # Verified on top of everything
-                    edgecolors="black", # Add border for contrast
+                    zorder=20,  # Verified on top of everything
+                    edgecolors="black",  # Add border for contrast
                 )
 
         # [New] Sink Reception (Physical Arrival from Traffic Log)
@@ -1528,16 +1589,16 @@ class AutoVisualizer:
         if not traffic_data.empty and "name" in traffic_data.columns:
             # Filter for DEPART events from Pipes connected to Destination
             sink_arrivals = traffic_data[
-                (traffic_data["event"] == "DEPART") & 
-                (traffic_data["name"].str.contains("Pipe", na=False)) &
-                (traffic_data["name"].str.contains("DST", na=False))
+                (traffic_data["event"] == "DEPART")
+                & (traffic_data["name"].str.contains("Pipe", na=False))
+                & (traffic_data["name"].str.contains("DST", na=False))
             ]
-            
+
             # Map time to us
             if not sink_arrivals.empty:
                 sink_t = sink_arrivals["time"] * 1e6
                 sink_seq = sink_arrivals["pkt_id"]
-                
+
                 ax1.scatter(
                     sink_t,
                     sink_seq,
@@ -1549,7 +1610,7 @@ class AutoVisualizer:
                     zorder=12,
                     edgecolors="none",
                 )
-        
+
         # Fallback to log-based if traffic log missing (optional)
         elif events.get("recv_t"):
             ax1.scatter(
@@ -1584,54 +1645,66 @@ class AutoVisualizer:
             if sorted_acks:
                 a_t, a_s = zip(*sorted_acks)
                 ax1.step(
-                    a_t, a_s,
-                    c="green", where="post", alpha=0.5, linewidth=2, label="Cum ACK Line"
+                    a_t,
+                    a_s,
+                    c="green",
+                    where="post",
+                    alpha=0.5,
+                    linewidth=2,
+                    label="Cum ACK Line",
                 )
-                
+
                 # [New] Generate Individual ACK Points (Green Solid Circle) - Deduplicated
                 # Goal: Mark each packet as ACKed exactly once, at the *earliest* time the Sender knows it.
-                
+
                 confirmed_seqs = set()
-                ack_events = [] # List of (time, seq, type)
-                
+                ack_events = []  # List of (time, seq, type)
+
                 # 1. Collect SACKs (Explicit)
                 if "sack_t" in events and events["sack_t"]:
                     for t, s in zip(events["sack_t"], events["sack_seq"]):
-                        ack_events.append((t, s, 'sack'))
-                
+                        ack_events.append((t, s, "sack"))
+
                 # 2. Collect Cum ACKs (Implicit Range)
                 sorted_valid_acks = sorted(zip(events["ack_t"], events["ack_seq"]))
                 if sorted_valid_acks:
-                     prev_s = 0 # Initialize to 0 to capture the first ACK segment (including Seq 0)
-                     # We can only infer new ACKs if the cum_ack increases.
-                     # We don't know the initial state before the first log, so we start from the first log.
-                     
-                     for t, s in sorted_valid_acks:
-                         if s > prev_s:
-                             # Range [prev_s, s) are newly cumulatively acked
-                             for seq_k in range(prev_s, s):
-                                 ack_events.append((t, seq_k, 'cum'))
-                             prev_s = s
-                         elif s < prev_s:
-                             # Reordering or weird log? Ignore regression for ACK generation to be safe.
-                             pass
-                
+                    prev_s = 0  # Initialize to 0 to capture the first ACK segment (including Seq 0)
+                    # We can only infer new ACKs if the cum_ack increases.
+                    # We don't know the initial state before the first log, so we start from the first log.
+
+                    for t, s in sorted_valid_acks:
+                        if s > prev_s:
+                            # Range [prev_s, s) are newly cumulatively acked
+                            for seq_k in range(prev_s, s):
+                                ack_events.append((t, seq_k, "cum"))
+                            prev_s = s
+                        elif s < prev_s:
+                            # Reordering or weird log? Ignore regression for ACK generation to be safe.
+                            pass
+
                 # 3. Sort all events by time to find the earliest confirmation
                 ack_events.sort(key=lambda x: x[0])
-                
+
                 plot_t = []
                 plot_s = []
-                
+
                 for t, seq, _ in ack_events:
                     if seq not in confirmed_seqs:
                         confirmed_seqs.add(seq)
                         plot_t.append(t)
                         plot_s.append(seq)
-                
+
                 if plot_t:
                     ax1.scatter(
-                        plot_t, plot_s,
-                        c="green", marker="o", s=40, alpha=0.8, edgecolors="none", label="Packet ACKed", zorder=15
+                        plot_t,
+                        plot_s,
+                        c="green",
+                        marker="o",
+                        s=40,
+                        alpha=0.8,
+                        edgecolors="none",
+                        label="Packet ACKed",
+                        zorder=15,
                     )
 
         # RTO Lines (Show on all plots)
@@ -1701,8 +1774,13 @@ class AutoVisualizer:
                 i_t, 0, i_v, color="gray", alpha=0.15, step="post", label="In-Flight"
             )
 
+        # Extract InternalID
+        internal_id_val = (
+            events.get("internal_id", [None])[0] if events.get("internal_id") else None
+        )
+
         ax1.set_title(
-            f"Full Stack Analysis: {flow_name} (LogID: {traffic_logged_id})",
+            f"Full Stack Analysis: {flow_name} (LogID: {traffic_logged_id}, InternalID: {internal_id_val if internal_id_val is not None else 'N/A'})",
             fontsize=14,
             pad=10,
         )
@@ -1856,5 +1934,3 @@ class AutoVisualizer:
             duration = t_max - t_min
             margin = duration * 0.02 if duration > 0 else 10.0
             ax_net.set_xlim(left=t_min - margin, right=t_max + margin)
-
-        return fig

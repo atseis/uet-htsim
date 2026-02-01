@@ -973,6 +973,11 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
                          << endl;
                 }
             } else {
+                if (_flow.flow_id() == _debug_flowid) {
+                    cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
+                         << " _probe_seqno MISMATCH want " << _probe_seqno << " got "
+                         << pkt.acked_psn() << endl;
+                }
                 delay = get_avg_delay();
             }
             pkt_size = 0;
@@ -2139,7 +2144,7 @@ mem_b UecSrc::sendRtxPacket(const Route& route) {
 void UecSrc::sendProbe() {
     if (_flow.flow_id() == _debug_flowid) {
         cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id() << " sendProbe "
-             << endl;
+             << " _probe_seqno " << _probe_seqno + 1 << endl;
     }
     _probe_seqno++;
     auto* p = UecDataPacket::newpkt(_flow, NULL, _probe_seqno, _hdr_size, UecBasePacket::DATA_PROBE,
@@ -2147,6 +2152,7 @@ void UecSrc::sendProbe() {
     p->set_dst(_dstaddr);
     uint16_t ev = _mp->nextEntropy(_highest_sent, (uint64_t)_cwnd / _mss);
     p->set_pathid(ev);
+    p->flow().logTraffic(*p, *this, TrafficLogger::PKT_CREATESEND);
     // p->sendOn();
     _nic.sendControlPacket(p, this, NULL);
 

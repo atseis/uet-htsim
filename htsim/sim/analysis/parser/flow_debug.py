@@ -24,23 +24,28 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
         }
     """
     events = {
-        "send_t": [], "send_seq": [], "send_ar": [], # [New] Added send_ar
+        "send_t": [], "send_seq": [], "send_ar": [], 
         "rtx_t": [], "rtx_seq": [],
         "ack_t": [], "ack_seq": [],
-        "sack_t": [], "sack_seq": [],  # [New] SACK events
-        "recv_t": [], "recv_seq": [],  # [New] Sink events
+        "sack_t": [], "sack_seq": [],
+        "probe_t": [], "probe_seq": [], # [New] Probe events
+        "recv_t": [], "recv_seq": [],
         "rto_t": [],
         "cwnd_t": [], "cwnd_val": [],
         "inflight_t": [], "inflight_val": [],
         "rtt_t": [], "delay_val": [], "raw_rtt_val": [],
+        "internal_id": [], # [New] Internal Flow ID (from flowId in log)
     }
 
     # Regexes from plot_trace.py
-    # Note: We rely on the log line containing the flow ID, so we filter lines first.
     
     # Send: "703.9 Uec_304_0 ... sending pkt 5 ..."
     p_send = re.compile(r"([\d\.]+)\s+.*sending pkt (\d+)")
     
+    # Probe: "703.9 flowid 102 sendProbe _probe_seqno 1"
+    # Matches: time, flowid (ignored), seqno
+    p_probe = re.compile(r"([\d\.]+)\s+.*sendProbe.*_probe_seqno\s+(\d+)")
+
     # RTX: "717.9 Uec_304_0 ... sending rtx pkt 6 ..."
     p_rtx = re.compile(r"([\d\.]+)\s+.*sending rtx pkt (\d+)")
     
@@ -48,34 +53,53 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
     p_ack = re.compile(r"At ([\d\.]+)\s+.*processAck.*cum_ack:\s*(\d+)")
     
     # SACK: "    Sack 10 flow Uec_304_0"
-    # Note: SACK logs often appear after the main processAck line w/ timestamp.
-    # We need to capture the indentation and format.
     p_sack = re.compile(r"\s+Sack (\d+)")
 
     # RTO: "rtx timer expired ... now time is 703.9" 
-    # Usually log has Flow Name associated? "flow Uec_304_0"
     p_rto = re.compile(r".*rtx timer expired.*now time is ([\d\.]+)")
 
+    # Flow Start: "Flow Uec_304_0 flowId 23 uecSrc 22 starting at 0"
+    # Captures: Name, FlowID, SrcID values (dynamic)
+    p_flow_start = re.compile(r"Flow\s+(\S+)\s+flowId\s+(\d+)\s+uecSrc\s+(\d+)\s+.*starting")
+    
     # State (from Send): "... cwnd 4150 ... in_flight 4150"
     p_state = re.compile(r"([\d\.]+)\s+.*cwnd (\d+).*in_flight (\d+)")
     
     # State (from ACK): "At 720.5 ... cwnd 10623 flightsize 8300"
-    # Note: Regex in plot_trace.py was: re.compile(r"At ([\d\.]+)\s+.*cwnd (\d+).*flightsize (\d+)")
     p_ack_state = re.compile(r"At ([\d\.]+)\s+.*cwnd (\d+).*flightsize (\d+)")
 
     # RTT info: "At ... delay 12.5 ... raw rtt 124.5"
     p_rtt_info = re.compile(r"At ([\d\.]+)\s+.*delay ([\d\.]+).*raw rtt (\d+)")
 
     last_ack_time = None
+    current_internal_id = None # Initialize current_internal_id
 
     lines = log_content.splitlines()
     for line in lines:
-        # Optimization: Only process lines related to expected events
-        # But we must be careful: "rtx timer expired" might not have flow name in the SAME line segment if grep wasn't used?
-        # Actually UecSrc log usually includes flow name.
-        # "uecSrc 23 rtx timer expired for seqno 11 flow Uec_304_0 packet sent at ..."
+        # 1. Update Internal ID Mapping
+        m_start = p_flow_start.search(line)
+        if m_start:
+            fname = m_start.group(1)
+            fid = int(m_start.group(2))
+            sid = int(m_start.group(3)) # SrcID (Component ID)
+            
+            if fname == target_flow_name:
+                current_internal_id = fid
+                events["internal_id"].append(fid) # Store FlowId as InternalID
+                # Found our target starting (or restarting).
+            elif current_internal_id == fid:
+                # [Crucial] ID Reuse Detection
+                # The ID we were tracking (fid) is now assigned to a DIFFERENT flow (fname).
+                # Only happens if the previous flow ended and ID was recycled.
+                # Stop tracking to avoid mixing logs.
+                current_internal_id = None
         
-        if target_flow_name not in line:
+        # 2. Filter lines: Must contain Flow Name OR (Current ID AND "flowid {id}")
+        # Note: Standard logs have Name. Probe logs have ID.
+        has_name = target_flow_name in line
+        has_id = (current_internal_id is not None) and (f"flowid {current_internal_id}" in line)
+        
+        if not (has_name or has_id):
             continue
 
         # --- Parse Send ---
@@ -98,6 +122,19 @@ def parse_flow_trace(log_content: str, target_flow_name: str) -> Dict[str, List[
                 else:
                      events["send_ar"].append(0) # Default to 0 if not found
             except ValueError: pass
+
+        # --- Parse Send Probe ---
+        # Only parse if line contains "sendProbe" AND matches our ID
+        if "sendProbe" in line:
+            m_probe = p_probe.search(line)
+            if m_probe:
+                # Double check ID if usage
+                # The regex doesn't extract ID, but we filtered by `has_id`.
+                # Wait, p_probe is generic. We trust `has_id` filter.
+                try:
+                    events["probe_t"].append(float(m_probe.group(1)))
+                    events["probe_seq"].append(int(m_probe.group(2)))
+                except ValueError: pass
 
         # --- Parse RTX ---
         m_rtx = p_rtx.search(line)

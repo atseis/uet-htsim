@@ -230,6 +230,22 @@ class ExperimentResult:
             return []
 
     # ==========================
+    # Helper: ID Resolution
+    # ==========================
+    def get_internal_flow_id(self, flow_name: str) -> Optional[int]:
+        """
+        [New] Reverse lookup: Find Internal ID for a given Flow Name.
+        Used for mapping visualization targets back to internal IDs.
+        """
+        if not self.idmap.data:
+            return None
+        # Reverse search (Low efficiency but safe for single target)
+        for fid, name in self.idmap.data.items():
+            if name == flow_name:
+                return fid
+        return None
+
+    # ==========================
     # Helper: Name Injection
     # ==========================
     def _inject_name(self, df: pd.DataFrame, id_col: str) -> pd.DataFrame:
@@ -831,6 +847,30 @@ class ExperimentResult:
             "queue_usage",
         ]
         sim_params["logtime"] = 0.01
+
+        # [Auto-Detect] 自动锁定最惨流并填入 debug_flowid
+        sd_df = self.flow_slowdown_df
+        if not sd_df.empty:
+             sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
+             # Try to find a flow that exists in trace logs
+             target_internal_id = None
+             target_name = None
+             
+             for _, row in sorted_worst.iterrows():
+                 fid = row["flow_id"]
+                 fname = self.idmap.get(fid)
+                 if fname:
+                     # Parse trace to get internal ID (Group 2 flowId)
+                     events = self.get_flow_trace_data(fname)
+                     # Check if we got valid internal ID
+                     if events and events.get("internal_id"):
+                         target_name = fname
+                         target_internal_id = events["internal_id"][0]
+                         break
+            
+             if target_internal_id is not None:
+                 sim_params["debug_flowid"] = int(target_internal_id)
+                 print(f"ℹ️ [Export] Auto-detected worst flow: {target_name} (InternalID: {target_internal_id})")
 
         # 提取可执行程序名
         original_cmd = data.get("command", "")
