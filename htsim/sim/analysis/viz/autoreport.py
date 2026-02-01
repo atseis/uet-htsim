@@ -1525,7 +1525,21 @@ class AutoVisualizer:
             max_seq = max(max_seq, max(events["recv_seq"]))
 
         # Probe Channel Y-position (Top of graph)
+        # Scaled to 1.1 as requested
         probe_y = max_seq * 1.05 if max_seq > 0 else 100
+
+        # Define Headroom Factor (Total Axis Height relative to Data)
+        # We give a bit more than 1.1 to ensure the marker fits comfortably
+        Y_HEADROOM = 1.2
+        
+        # Calculate Max Bytes for Right Axis (CWND / InFlight)
+        max_bytes = 0
+        if events.get("cwnd_val"):
+            max_bytes = max(max_bytes, max(events["cwnd_val"]))
+        if events.get("inflight_val"):
+            max_bytes = max(max_bytes, max(events["inflight_val"]))
+            
+
 
         # --- Plot Probes (Top Channel) ---
         # --- Plot Probes (Top Channel) ---
@@ -1575,14 +1589,17 @@ class AutoVisualizer:
                 for t_arr, seq_arr in zip(events["probe_recv_t"], events["probe_recv_seq"]):
                     if seq_arr in send_map:
                         t_send = send_map[seq_arr]
-                        # Draw line
-                        ax1.plot(
-                            [t_send, t_arr],
-                            [probe_y, probe_y],
-                            color="magenta",
-                            linestyle="-",
-                            linewidth=0.5,
-                            alpha=0.5,
+                        # Draw curved line (Arc)
+                        ax1.annotate("",
+                            xy=(t_arr, probe_y), xycoords='data',
+                            xytext=(t_send, probe_y), textcoords='data',
+                            arrowprops=dict(
+                                arrowstyle="-",
+                                color="magenta",
+                                connectionstyle="arc3,rad=-0.5", 
+                                linewidth=0.5,
+                                alpha=0.5
+                            ),
                             zorder=29
                         )
 
@@ -1631,9 +1648,57 @@ class AutoVisualizer:
             ]
 
             # Map time to us
+            # Map time to us
             if not sink_arrivals.empty:
                 sink_t = sink_arrivals["time"] * 1e6
                 sink_seq = sink_arrivals["pkt_id"]
+
+                # --- Filter out Probes (Greedy Matching) ---
+                # Strategy: For each confirmed Probe Arrival, find the *single closest*
+                # event in Sink Arrivals (same Seq, time < 5us) and remove it.
+                # This ensures we don't accidentally remove a Data packet if it arrives
+                # at the exact same time as a Probe.
+                
+                if events.get("probe_recv_t"):
+                    probe_list = list(zip(events["probe_recv_t"], events["probe_recv_seq"]))
+                    
+                    # Convert to easier format for searching
+                    # We keep original indices to drop later
+                    sink_candidates = [] # list of (time, seq, original_index)
+                    t_list = sink_t.tolist()
+                    s_list = sink_seq.tolist()
+                    for i, (t, s) in enumerate(zip(t_list, s_list)):
+                        sink_candidates.append({'t': t, 's': s, 'idx': i, 'matched': False})
+                    
+                    indices_to_drop = set()
+
+                    for pt, ps in probe_list:
+                        # Find best match for this specific probe
+                        best_match = None
+                        min_diff = 5.0 # Max tolerance 5us
+
+                        for cand in sink_candidates:
+                            if cand['matched']: continue # Already matched to another probe
+                            if cand['s'] != ps: continue # Sequence mismatch
+                            
+                            diff = abs(cand['t'] - pt)
+                            if diff < min_diff:
+                                min_diff = diff
+                                best_match = cand
+                        
+                        if best_match:
+                            best_match['matched'] = True
+                            indices_to_drop.add(best_match['idx'])
+                    
+                    # Keep only indices NOT in indices_to_drop
+                    keep_indices = [i for i in range(len(sink_t)) if i not in indices_to_drop]
+                    
+                    if keep_indices:
+                        sink_t = sink_t.iloc[keep_indices]
+                        sink_seq = sink_seq.iloc[keep_indices]
+                    else:
+                        sink_t = pd.Series([], dtype=float)
+                        sink_seq = pd.Series([], dtype=int)
 
                 ax1.scatter(
                     sink_t,
@@ -1777,12 +1842,13 @@ class AutoVisualizer:
             trims = physical_events[physical_events["event"] == "TRIM"]
             if not trims.empty:
                 ax1.scatter(
-                    # TRIM 使用三角
+                    # TRIM Uses Triangle
                     trims["time"],
                     trims["pkt_id"],
-                    c="tab:orange",
+                    facecolors="none",
+                    edgecolors="tab:orange",
                     marker="^",
-                    s=80,
+                    s=40,
                     linewidth=1.5,
                     label="Physical TRIM",
                     zorder=20,
@@ -1796,6 +1862,11 @@ class AutoVisualizer:
             fontsize=11,
             fontweight="bold",
         )
+        # Synchronize Axis Limits to reserve top 20% on both sides
+        if max_seq > 0:
+            ax1.set_ylim(bottom=0, top=max_seq * Y_HEADROOM)
+        if max_bytes > 0:
+            ax1_r.set_ylim(bottom=0, top=max_bytes * Y_HEADROOM)
         ax1_r.tick_params(axis="y", labelcolor="tab:purple")
 
         if events["cwnd_t"]:
@@ -1821,17 +1892,10 @@ class AutoVisualizer:
             pad=10,
         )
 
-        # === Legend Row 1 ===
+        # === Legend Row 1 (Handles Only) ===
         lines1, labs1 = ax1.get_legend_handles_labels()
         lines1r, labs1r = ax1_r.get_legend_handles_labels()
-        ax1.legend(
-            lines1 + lines1r,
-            labs1 + labs1r,
-            loc="upper right",
-            ncol=1,
-            fontsize=9,
-            framealpha=0.9,
-        )
+        # Legend moved to bottom of figure
 
         ax1_r.yaxis.set_major_formatter(ticker.FuncFormatter(self._fmt_bytes))
 
@@ -1946,16 +2010,10 @@ class AutoVisualizer:
                     bbox=dict(facecolor="white", alpha=0.7),
                 )
 
-        # Legends Row 2
+        # Legends Row 2 (Handles Only)
         lines2, labs2 = ax_net.get_legend_handles_labels()
         lines3, labs3 = ax_lat.get_legend_handles_labels()
-        ax_net.legend(
-            lines2 + lines3,
-            labs2 + labs3,
-            loc="upper right",
-            fontsize=9,
-            framealpha=0.9,
-        )
+        # Legend moved to bottom of figure
 
         ax_net.grid(True, ls=":", alpha=0.4)
 
@@ -1970,3 +2028,23 @@ class AutoVisualizer:
             duration = t_max - t_min
             margin = duration * 0.02 if duration > 0 else 10.0
             ax_net.set_xlim(left=t_min - margin, right=t_max + margin)
+
+        # --- Unified Legend (Bottom, Multi-column) ---
+        all_lines = lines1 + lines1r + lines2 + lines3
+        all_labs = labs1 + labs1r + labs2 + labs3
+        
+        # Deduplicate
+        by_label = dict(zip(all_labs, all_lines))
+        
+        fig.legend(
+            by_label.values(),
+            by_label.keys(),
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.01),
+            ncol=6, # 4-6 columns as requested
+            fontsize=10,
+            frameon=True,
+            framealpha=0.9
+        )
+        
+        plt.subplots_adjust(bottom=0.15, right=0.95, top=0.92)
