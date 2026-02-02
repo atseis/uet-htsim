@@ -304,11 +304,41 @@ def run_experiment(
         k: v for k, v in common.items() if k not in ("traffic", "simulation")
     }
 
-    experiments_dir = PROJECT_DIR / "experiments"
-    results_base_dir = PROJECT_DIR / "results"
-
     config_file_path_obj = Path(config_file_path).resolve()
-    relative_path = config_file_path_obj.relative_to(experiments_dir)
+
+    # [New] Dynamic Path Resolution
+    # Locate the right-most "experiments" folder in the path to support relocation/archiving
+    experiments_dir = None
+    for parent in [config_file_path_obj] + list(config_file_path_obj.parents):
+        if parent.name == "experiments":
+            experiments_dir = parent
+            break
+    
+    if experiments_dir:
+        # Case A: Standard structure (.../experiments/subdir/test.yaml)
+        # We output to sibling .../results/subdir/test
+        project_root = experiments_dir.parent
+        results_base_dir = project_root / "results"
+        relative_path = config_file_path_obj.relative_to(experiments_dir)
+    else:
+        # Case B: Fallback (Legacy or custom placement)
+        # If input is not inside an "experiments" folder, default to PROJECT_DIR logic
+        # or just place results relative to the script? 
+        # For safety/backward compatibility, we default to Project Root logic if possible, 
+        # but if the file is totally outside, we fallback to CWD/results.
+        experiments_dir = PROJECT_DIR / "experiments"
+        results_base_dir = PROJECT_DIR / "results"
+        
+        try:
+            relative_path = config_file_path_obj.relative_to(experiments_dir)
+        except ValueError:
+            # File is outside standard source tree. 
+            # Treat the file's parent directory as the "experiment group"
+            # Output to <FileParent>/../results/<FileNameWithoutExt>
+            # Example: /tmp/my_test.yaml -> /tmp/results/my_test
+            results_base_dir = config_file_path_obj.parent.parent / "results"
+            relative_path = Path(config_file_path_obj.stem)
+
     output_dir_name = relative_path.with_suffix("").as_posix()
     current_exp_results_dir = results_base_dir / output_dir_name
     current_exp_results_dir.mkdir(parents=True, exist_ok=True)
@@ -497,13 +527,21 @@ def run_experiment(
                 # 构造全量参数字典
                 full_params_dict = {**common_flat, **task["t_var"], **task["s_var"]}
 
+                # [New] Compute Relative Path for Source YAML (for archiving portability)
+                try:
+                    # Make path relative to the directory containing status.yaml (i.e. out_name)
+                    source_yaml_rel = os.path.relpath(config_file_path_obj, start=task["out_name"])
+                except ValueError:
+                    # Fallback for Windows different drives
+                    source_yaml_rel = str(config_file_path_obj)
+
                 status.initialize_status(
                     task["status_file"],
                     full_command,
                     label,
                     variables=task_variables,
                     all_params=full_params_dict,
-                    source_yaml=str(config_file_path_obj),
+                    source_yaml=source_yaml_rel,
                 )
 
                 if task["execute"]:

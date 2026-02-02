@@ -22,3 +22,5 @@ output/
 *.log
 htsim/sim/results/
 htsim/sim/data/connection_matrices/
+htsim/sim/archive/
+htsim/sim/experiments/
