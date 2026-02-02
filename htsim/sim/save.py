@@ -65,7 +65,24 @@ def main():
     # 3. 复制目录 (experiments, results)
     # Ignore compiled/temp files if needed, but current requirement is "all content"
     # We might want to use ignore_patterns to skip __pycache__ etc.
-    ignore_func = shutil.ignore_patterns("__pycache__", ".git", ".vscode", "*.pyc")
+    # Custom ignore function:
+    # 1. Always ignore standard clutter (__pycache__, etc)
+    # 2. If 'snapshot' directory exists in the current folder, ignore logs
+    def smart_ignore(src_dir, names):
+        # Base ignores
+        ignored = set(shutil.ignore_patterns("__pycache__", ".git", ".vscode", "*.pyc")(src_dir, names))
+        
+        # Check for snapshot existence
+        if "snapshot" in names:
+            # Snapshot exists here! We can safely skip raw logs
+            if "output.log" in names:
+                ignored.add("output.log")
+            if "stdout.log" in names:
+                ignored.add("stdout.log")
+        
+        return list(ignored)
+
+    ignore_func = smart_ignore
     
     tasks = [
         ("experiments", EXPERIMENTS_DIR),

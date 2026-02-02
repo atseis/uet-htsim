@@ -4,6 +4,8 @@ from typing import Dict, Union, Optional, List, Any
 from functools import cached_property
 import pandas as pd
 import numpy as np
+import json
+import gzip
 
 from ..parser import idmap, statusyaml, flow, queue, sink, nic, traffic, cwnd
 
@@ -142,8 +144,86 @@ class ExperimentResult:
             raise FileNotFoundError(f"Path {path} is invalid")
 
     def _validate_files(self):
-        if not (self.base_dir / self.FILES["log"]).exists():
-            pass
+        # [Modified] Allow initialization if EITHER log OR snapshot exists
+        log_exists = (self.base_dir / self.FILES["log"]).exists()
+        snapshot_exists = (self.base_dir / "snapshot").exists()
+        
+        if not log_exists and not snapshot_exists:
+            # Only warn if neither exists (strict check might break lazy loading)
+             pass
+
+    # ==========================
+    # Snapshot / Parquet Support
+    # ==========================
+    @property
+    def snapshot_dir(self) -> Path:
+        p = self.base_dir / "snapshot"
+        p.mkdir(exist_ok=True)
+        return p
+
+    def _load_snapshot(self, name: str) -> Optional[pd.DataFrame]:
+        """Try to load a DataFrame from parquet snapshot."""
+        path = self.snapshot_dir / f"{name}.parquet"
+        if path.exists():
+            try:
+                # [Optimization] PyArrow is much faster
+                return pd.read_parquet(path, engine="pyarrow")
+            except Exception as e:
+                print(f"[Warn] Failed to load snapshot {name}: {e}")
+        return None
+
+    def _save_snapshot(self, name: str, df: pd.DataFrame):
+        """Save DataFrame to parquet snapshot."""
+        if df.empty:
+            return
+        path = self.snapshot_dir / f"{name}.parquet"
+        try:
+            df.to_parquet(path, engine="pyarrow", compression="snappy", index=False)
+        except Exception as e:
+            print(f"[Warn] Failed to save snapshot {name}: {e}")
+
+    def _load_json_snapshot(self, name: str) -> Optional[Dict]:
+        """Load Dict from compressed JSON snapshot."""
+        path = self.snapshot_dir / f"{name}.json.gz"
+        if path.exists():
+            try:
+                with gzip.open(path, "rt", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                 print(f"[Warn] Failed to load JSON snapshot {name}: {e}")
+        return None
+
+    def _save_json_snapshot(self, name: str, data: Dict):
+        """Save Dict to compressed JSON snapshot."""
+        if not data:
+            return
+        path = self.snapshot_dir / f"{name}.json.gz"
+        try:
+            with gzip.open(path, "wt", encoding="utf-8") as f:
+                json.dump(data, f)
+        except Exception as e:
+            print(f"[Warn] Failed to save JSON snapshot {name}: {e}")
+
+    def export_snapshots(self):
+        """
+        Manually trigger saving of all core DataFrames.
+        Used by save.py before archiving.
+        """
+        print(f"  - Snapshotting flows...")
+        self._save_snapshot("flows", self.flow_df)
+        
+        print(f"  - Snapshotting traffic (this may take time)...")
+        self._save_snapshot("traffic", self.traffic_df)
+        
+        print(f"  - Snapshotting queues...")
+        self._save_snapshot("queues", self._raw_sampling_df)
+        
+        print(f"  - Snapshotting nic/switches...")
+        self._save_snapshot("nic", self.nic_df)
+        
+        print(f"  - Snapshotting cwnd...")
+        self._save_snapshot("cwnd", self.cwnd_df)
+        # Add others as needed
 
     def __repr__(self):
         return f"<ExperimentResult: {self.base_dir.name}>"
@@ -271,15 +351,35 @@ class ExperimentResult:
     @cached_property
     def cwnd_df(self) -> pd.DataFrame:
         """从 stdout.log 提取 cwnd 演变轨迹"""
+        # 1. Try Snapshot
+        cached = self._load_snapshot("cwnd")
+        if cached is not None:
+            return cached
+
+        # 2. Parse Log
         if not self.stdout_path.exists():
             return pd.DataFrame()
-        return cwnd.parse_cwnd_from_file(self.stdout_path)
+        df = cwnd.parse_cwnd_from_file(self.stdout_path)
+        
+        # 3. Save Snapshot
+        self._save_snapshot("cwnd", df)
+        return df
 
     @cached_property
     def flow_df(self) -> pd.DataFrame:
+        # 1. Try Snapshot
+        cached = self._load_snapshot("flows")
+        if cached is not None:
+            return cached
+
+        # 2. Parse Log
         if not self.log_path.exists():
             return pd.DataFrame()
-        return flow.parse_flow_events_from_file(self.log_path.as_posix())
+        df = flow.parse_flow_events_from_file(self.log_path.as_posix())
+        
+        # 3. Save Snapshot
+        self._save_snapshot("flows", df)
+        return df
 
     @cached_property
     def flow_slowdown_df(self) -> pd.DataFrame:
@@ -309,6 +409,12 @@ class ExperimentResult:
     @cached_property
     def traffic_df(self) -> pd.DataFrame:
         """[Traffic] 全量数据包事件轨迹 (自动注入 Location Name)"""
+        # 1. Try Snapshot
+        cached = self._load_snapshot("traffic")
+        if cached is not None:
+            return cached
+            
+        # 2. Parse Log
         if not self.log_path.exists():
             return pd.DataFrame()
 
@@ -318,10 +424,19 @@ class ExperimentResult:
             return df
 
         # 注入位置名称：将 location_id 映射为物理组件名
-        return self._inject_name(df, "location_id")
+        df = self._inject_name(df, "location_id")
+        
+        # 3. Save Snapshot
+        self._save_snapshot("traffic", df)
+        return df
 
     @cached_property
     def nic_df(self) -> pd.DataFrame:
+        # 1. Try Snapshot
+        cached = self._load_snapshot("nic")
+        if cached is not None:
+            return cached
+
         if not self.log_path.exists():
             return pd.DataFrame()
 
@@ -340,7 +455,9 @@ class ExperimentResult:
         # NIC 不需要 Name (IdMap 也没有 NIC ID)
         if "name" in df.columns:
             df = df.drop(columns=["name"])
-
+            
+        # 3. Save Snapshot
+        self._save_snapshot("nic", df)
         return df
 
     # ==========================
@@ -397,6 +514,11 @@ class ExperimentResult:
     @cached_property
     def _raw_sampling_df(self) -> pd.DataFrame:
         """Merge Range, Overflow, Traffic with High Precision Alignment."""
+        # 1. Try Snapshot
+        cached = self._load_snapshot("queues")
+        if cached is not None:
+            return cached
+            
         if not self.log_path.exists():
             return pd.DataFrame()
 
@@ -606,6 +728,16 @@ class ExperimentResult:
         """
         from ..parser import flow_debug
         
+        if not flow_name: 
+             return {}
+        
+        # 1. Try Snapshot (Compressed JSON)
+        trace_id = f"trace_{flow_name}"
+        cached = self._load_json_snapshot(trace_id)
+        if cached is not None:
+             return cached
+
+        # 2. Parse Log (if exists)
         if not self.stdout_path.exists():
             print(f"[Warn] No stdout.log found at {self.stdout_path}")
             return {}
@@ -614,7 +746,13 @@ class ExperimentResult:
              # Read full log (expensive but necessary for grep-less extraction)
             with open(self.stdout_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
-            return flow_debug.parse_flow_trace(content, flow_name)
+            data = flow_debug.parse_flow_trace(content, flow_name)
+            
+            # 3. Save Snapshot
+            if data:
+                 self._save_json_snapshot(trace_id, data)
+            
+            return data
         except Exception as e:
             print(f"Error parsing trace: {e}")
             return {}
