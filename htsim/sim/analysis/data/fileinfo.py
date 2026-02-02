@@ -1,4 +1,4 @@
-import re
+import re, os
 from pathlib import Path
 from typing import Dict, Union, Optional, List, Any
 from functools import cached_property
@@ -941,7 +941,14 @@ class ExperimentResult:
         if not source_yaml_str:
             raise ValueError(f"status.yaml 中未记录 source_yaml，无法定位原始路径。")
 
-        source_path = Path(source_yaml_str)
+        # [Fix] Resolve relative source path against base_dir (results dir)
+        # source_yaml in status.yaml is now relative to status.yaml's location
+        p = Path(source_yaml_str)
+        if not p.is_absolute():
+            source_path = (self.base_dir / p).resolve()
+        else:
+            source_path = p
+            
         all_params = data.get("all_params", {})
 
         # 1. 生成身份标识与文件名
@@ -1033,7 +1040,7 @@ class ExperimentResult:
         with open(target_path, "w", encoding="utf-8") as f:
             f.write(yaml_str)
 
-        return str(target_path.resolve())
+        return os.path.relpath(target_path)
 
     def diagnose_deadlock(self) -> List[Dict]:
         """
