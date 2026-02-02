@@ -328,11 +328,13 @@ int main(int argc, char** argv) {
                     // not currently used, so use default logger
                     out = Logger::event_to_str(event);
                     break;
+                case Logger::UEC_TRAFFIC:
+                    out = UecTrafficLogger::event_to_str(event);
+                    break;
                 case Logger::UEC_EVENT:
                 case Logger::UEC_STATE:
                 case Logger::UEC_RECORD:
                 case Logger::UEC_MEMORY:
-                case Logger::UEC_TRAFFIC:
                     // not currently used, so use default logger
                     out = Logger::event_to_str(event);
                     break;

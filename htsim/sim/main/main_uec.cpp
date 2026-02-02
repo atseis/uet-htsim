@@ -597,9 +597,9 @@ int main(int argc, char** argv) {
         nic_logger = new NicLoggerSampling(logtime, eventlist);
         logfile.addLogger(*nic_logger);
     }
-    TrafficLoggerSimple* traffic_logger = NULL;
+    TrafficLogger* traffic_logger = NULL;
     if (log_traffic) {
-        traffic_logger = new TrafficLoggerSimple();
+        traffic_logger = new UecTrafficLogger();
         logfile.addLogger(*traffic_logger);
     }
     FlowEventLoggerSimple* event_logger = NULL;

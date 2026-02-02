@@ -11,9 +11,10 @@ def parse_traffic_events(text: str) -> pd.DataFrame:
     格式: 0.000000332 Type TRAFFIC ID 2553 Ev DEPART  FlowID 9006 PktID 0
     """
     data = []
-    # 正则匹配：时间, ID, 事件类型, FlowID, PktID
+    # 正则匹配：时间, ID, 事件类型, FlowID, PktID, [Optional] PktType
+    # 支持 TRAFFIC 和 UECTRAFFIC
     pattern = re.compile(
-        r"(\d+\.\d+)\s+Type\s+TRAFFIC\s+ID\s+(\d+)\s+Ev\s+(\w+)\s+FlowID\s+(\d+)\s+PktID\s+(\d+)"
+        r"(\d+\.\d+)\s+Type\s+(?:TRAFFIC|UECTRAFFIC)\s+ID\s+(\d+)\s+Ev\s+(\w+)\s+FlowID\s+(\d+)\s+PktID\s+(\d+)(?:\s+PktType\s+(\w+))?"
     )
 
     for line in text.splitlines():
@@ -24,15 +25,18 @@ def parse_traffic_events(text: str) -> pd.DataFrame:
         match = pattern.search(line)
         if match:
             try:
-                data.append(
-                    {
-                        "time": float(match.group(1)),
-                        "location_id": int(match.group(2)),
-                        "event": match.group(3),
-                        "flow_id": int(match.group(4)),
-                        "pkt_id": int(match.group(5)),
-                    }
-                )
+                item = {
+                    "time": float(match.group(1)),
+                    "location_id": int(match.group(2)),
+                    "event": match.group(3),
+                    "flow_id": int(match.group(4)),
+                    "pkt_id": int(match.group(5)),
+                }
+                # 如果捕获到了 PktType
+                if match.group(6):
+                    item["pkt_type"] = match.group(6)
+                
+                data.append(item)
             except ValueError:
                 continue
 

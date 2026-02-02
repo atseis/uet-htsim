@@ -1648,18 +1648,21 @@ class AutoVisualizer:
             ]
 
             # Map time to us
-            # Map time to us
             if not sink_arrivals.empty:
                 sink_t = sink_arrivals["time"] * 1e6
                 sink_seq = sink_arrivals["pkt_id"]
 
-                # --- Filter out Probes (Greedy Matching) ---
-                # Strategy: For each confirmed Probe Arrival, find the *single closest*
-                # event in Sink Arrivals (same Seq, time < 5us) and remove it.
-                # This ensures we don't accidentally remove a Data packet if it arrives
-                # at the exact same time as a Probe.
                 
-                if events.get("probe_recv_t"):
+                # --- Filter out Probes ---
+                if "pkt_type" in sink_arrivals.columns:
+                    # [New] Precise Filtering using Logged Packet Type
+                    # Exclude PROBE packets from the "Normal Data Arrival" plot
+                    sink_arrivals_clean = sink_arrivals[sink_arrivals["pkt_type"] != "PROBE"]
+                    sink_t = sink_arrivals_clean["time"] * 1e6
+                    sink_seq = sink_arrivals_clean["pkt_id"]
+
+                elif events.get("probe_recv_t"):
+                    # [Legacy] Heuristic Greedy Matching
                     probe_list = list(zip(events["probe_recv_t"], events["probe_recv_seq"]))
                     
                     # Convert to easier format for searching
@@ -1678,8 +1681,10 @@ class AutoVisualizer:
                         min_diff = 5.0 # Max tolerance 5us
 
                         for cand in sink_candidates:
-                            if cand['matched']: continue # Already matched to another probe
-                            if cand['s'] != ps: continue # Sequence mismatch
+                            if cand['matched']:
+                                continue
+                            if cand['s'] != ps:
+                                continue
                             
                             diff = abs(cand['t'] - pt)
                             if diff < min_diff:
@@ -1690,13 +1695,19 @@ class AutoVisualizer:
                             best_match['matched'] = True
                             indices_to_drop.add(best_match['idx'])
                     
-                    # Keep only indices NOT in indices_to_drop
-                    keep_indices = [i for i in range(len(sink_t)) if i not in indices_to_drop]
-                    
-                    if keep_indices:
-                        sink_t = sink_t.iloc[keep_indices]
-                        sink_seq = sink_seq.iloc[keep_indices]
-                    else:
+                    # Reconstruct filtered lists
+                    if indices_to_drop:
+                        print(f"Filtered {len(indices_to_drop)} Probe physical events from Data plot.")
+                        sink_t = [t for i, t in enumerate(t_list) if i not in indices_to_drop]
+                        sink_seq = [s for i, s in enumerate(s_list) if i not in indices_to_drop]
+                        sink_t = pd.Series(sink_t, dtype=float)
+                        sink_seq = pd.Series(sink_seq, dtype=int)
+                    # If no probes were dropped, sink_t and sink_seq remain as original Series.
+                    # If all were dropped, then sink_t and sink_seq should be empty Series.
+                    elif not indices_to_drop and len(t_list) > 0: # No probes dropped, but there were sink arrivals
+                        # sink_t and sink_seq are already correctly assigned from sink_arrivals
+                        pass
+                    else: # No sink arrivals or all were probes and dropped
                         sink_t = pd.Series([], dtype=float)
                         sink_seq = pd.Series([], dtype=int)
 
@@ -1821,6 +1832,10 @@ class AutoVisualizer:
         # Map physical drops/trims from Traffic Log directly to Sequence Number
         t_plot = self._to_us(traffic_data)
         physical_events = t_plot[t_plot["event"].isin(["DROP", "TRIM"])]
+        
+        # [Fix] Filter out PROBE triggers for congestion events too
+        if "pkt_type" in physical_events.columns:
+            physical_events = physical_events[physical_events["pkt_type"] != "PROBE"]
 
         if not physical_events.empty:
             # Drop Events

@@ -46,3 +46,9 @@ class UecNicLoggerSampling : public NicLoggerSampling {
 */
 
 #endif
+
+class UecTrafficLogger : public TrafficLogger {
+public:
+    void logTraffic(Packet& pkt, Logged& location, TrafficEvent ev) override;
+    static string event_to_str(RawLogEvent& event);
+};
