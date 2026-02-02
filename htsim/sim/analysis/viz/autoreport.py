@@ -1863,10 +1863,14 @@ class AutoVisualizer:
             fontweight="bold",
         )
         # Synchronize Axis Limits to reserve top 20% on both sides
+        # Synchronize Axis Limits to reserve top 20% on both sides
+        # Also limit bottom to slightly below 0 (e.g. -2%) to avoid cutting off markers at 0
         if max_seq > 0:
-            ax1.set_ylim(bottom=0, top=max_seq * Y_HEADROOM)
+            top_seq = max_seq * Y_HEADROOM
+            ax1.set_ylim(bottom=-top_seq * 0.02, top=top_seq)
         if max_bytes > 0:
-            ax1_r.set_ylim(bottom=0, top=max_bytes * Y_HEADROOM)
+            top_bytes = max_bytes * Y_HEADROOM
+            ax1_r.set_ylim(bottom=-top_bytes * 0.02, top=top_bytes)
         ax1_r.tick_params(axis="y", labelcolor="tab:purple")
 
         if events["cwnd_t"]:
