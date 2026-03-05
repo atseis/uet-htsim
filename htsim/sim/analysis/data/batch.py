@@ -914,8 +914,9 @@ class BatchVisualizer:
 
         if title:
             g.fig.suptitle(title, y=1.02)
+        _fig = g.fig  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), title or "plot_pivot")
+        self._attach_save_btn(_fig, title or "plot_pivot")
         return g
 
     def plot_facet(
@@ -975,9 +976,10 @@ class BatchVisualizer:
         g.add_legend()
         for ax in g.axes.flat:
              ax.grid(True, ls="--", alpha=0.5)
-             
+
+        _fig = g.fig  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), "batch_facet")
+        self._attach_save_btn(_fig, "batch_facet")
         return g
 
     def drill_down(self, **params):
@@ -1017,8 +1019,9 @@ class BatchVisualizer:
 
         plt.title(f"Distribution of {y} across Seeds")
         plt.grid(axis="y", ls="--", alpha=0.3)
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), f"distribution_{y}")
+        self._attach_save_btn(_fig, f"distribution_{y}")
 
     def plot_improvement(
         self,
@@ -1043,8 +1046,9 @@ class BatchVisualizer:
         plt.axhline(0, color="red", lw=1)
         plt.ylabel("Improvement (%)")
         plt.title(f"{target_version} vs {base_version}: {metric} Reduction")
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), f"{target_version}_vs_{base_version}_{metric}")
+        self._attach_save_btn(_fig, f"{target_version}_vs_{base_version}_{metric}")
 
     def plot_generic(
         self,
@@ -1100,8 +1104,9 @@ class BatchVisualizer:
         if title:
             g.fig.suptitle(title, y=1.05, fontsize=14)
 
+        _fig = g.fig  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), title or "plot_generic")
+        self._attach_save_btn(_fig, title or "plot_generic")
         return g
 
     def plot_tradeoff(
@@ -1191,8 +1196,9 @@ class BatchVisualizer:
         ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
 
         plt.tight_layout()
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), title or "plot_tradeoff")
+        self._attach_save_btn(_fig, title or "plot_tradeoff")
 
     def plot_statistical_summary(
         self,
@@ -1367,8 +1373,9 @@ class BatchVisualizer:
         ax.set_title(title)
         ax.grid(True, which="both", ls="--", alpha=0.4)
 
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), title)
+        self._attach_save_btn(_fig, title)
         return ax
 
     # ==========================================
@@ -1514,8 +1521,9 @@ class BatchVisualizer:
                 axes[row_idx][0].yaxis.set_major_formatter(FuncFormatter(fmt_func_y))
 
         plt.tight_layout()
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), f"main_effects_{metric if isinstance(metric,str) else metric[0]}")
+        self._attach_save_btn(_fig, f"main_effects_{metric if isinstance(metric,str) else metric[0]}")
 
     def plot_parallel_coordinates(
         self,
@@ -1792,8 +1800,9 @@ class BatchVisualizer:
                 ax.axvline(x, color='black', alpha=0.1, linewidth=1)
                 
             plt.tight_layout()
+            _fig = plt.gcf()  # capture before plt.show() resets state
             plt.show()
-            self._attach_save_btn(plt.gcf(), title or "parallel_coordinates")
+            self._attach_save_btn(_fig, title or "parallel_coordinates")
 
         return plot_df
 
@@ -1882,8 +1891,9 @@ class BatchVisualizer:
             for ax in ax_row:
                 ax.grid(True, ls="--", alpha=0.2)
         plt.tight_layout()
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), "scatter_matrix")
+        self._attach_save_btn(_fig, "scatter_matrix")
         return axs
 
     def plot_response_surface(
@@ -2010,8 +2020,9 @@ class BatchVisualizer:
                 ax.set_title(f"Response Surface\n{z} vs ({x}, {y})", fontsize=15, fontweight='bold')
 
             plt.tight_layout()
+            _fig = plt.gcf()  # capture before plt.show() resets state
             plt.show()
-            self._attach_save_btn(plt.gcf(), title or f"response_surface_{z}_vs_{x}_{y}")
+            self._attach_save_btn(_fig, title or f"response_surface_{z}_vs_{x}_{y}")
 
     def plot_auto_interactions(self, metrics: List[str] = None):
         """
@@ -2095,8 +2106,9 @@ class BatchVisualizer:
             
         plt.title(title if title else f"Distribution of {y}")
         plt.tight_layout()
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), title or f"distribution_{y}")
+        self._attach_save_btn(_fig, title or f"distribution_{y}")
 
     def plot_scatter(
         self,
@@ -2140,8 +2152,9 @@ class BatchVisualizer:
         plt.grid(True, linestyle='--', alpha=0.3)
         plt.title(title if title else f"{x} vs {y}")
         plt.tight_layout()
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), title or f"{x}_vs_{y}")
+        self._attach_save_btn(_fig, title or f"{x}_vs_{y}")
 
     # ==========================================
     # 8. Smart Analysis Capabilities (LHS-Native)
@@ -2212,8 +2225,9 @@ class BatchVisualizer:
         plt.title(f"What Matters Most? (Impact on {metric})")
         plt.xlabel("Relative Importance (Random Forest)")
         plt.tight_layout()
+        _fig = plt.gcf()  # capture before plt.show() resets state
         plt.show()
-        self._attach_save_btn(plt.gcf(), f"feature_importance_{metric}")
+        self._attach_save_btn(_fig, f"feature_importance_{metric}")
 
         # 6. 输出结论
         print("\n=== Feature Importance Ranking (Top 5) ===")

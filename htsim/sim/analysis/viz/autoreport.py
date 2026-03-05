@@ -186,6 +186,39 @@ class AutoVisualizer:
     # 公共交互方法 (Show & Save)
     # ==========================================
 
+    def _attach_save_btn(self, fig, title: str = "figure"):
+        """在 Jupyter 环境中，于图片下方显示「💾 Save as PDF」按钮。"""
+        try:
+            import datetime, re, matplotlib
+            import ipywidgets as widgets
+            from IPython.display import display as _display
+            matplotlib.rcParams['pdf.fonttype'] = 42
+            matplotlib.rcParams['ps.fonttype'] = 42
+
+            save_dir = self.result.base_dir.parent / "figures"
+            save_dir.mkdir(parents=True, exist_ok=True)
+            slug = re.sub(r'[^\w\-]+', '_', str(title).strip()).strip('_').lower()[:60]
+
+            def _on_save(b, _fig=fig, _dir=save_dir, _slug=slug):
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                fname = _dir / f"{_slug}_{ts}.pdf"
+                _fig.savefig(fname, bbox_inches="tight")
+                b.description = "✅ Saved!"
+                b.button_style = "success"
+                b.disabled = True
+                print(f"[save] → {fname}")
+
+            btn = widgets.Button(
+                description="💾 Save as PDF",
+                button_style="info",
+                icon="download",
+                layout=widgets.Layout(width="180px", height="36px"),
+            )
+            btn.on_click(_on_save)
+            _display(btn)
+        except ImportError:
+            pass  # 非 Jupyter 环境，静默跳过
+
     def show(self):
         """[Interactive Mode] 漏斗式逻辑引导报告"""
         if not IPYTHON_AVAILABLE:
@@ -213,6 +246,7 @@ class AutoVisualizer:
                     if fig:
                         display(Markdown(f"### {title}"))
                         display(fig)
+                        self._attach_save_btn(fig, title)
                         plt.close(fig)
                 except Exception as e:
                     display(Markdown(f"**Error plotting {title}:** {str(e)}"))
