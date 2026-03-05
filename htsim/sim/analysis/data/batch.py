@@ -731,6 +731,47 @@ class BatchResult:
 class BatchVisualizer:
     def __init__(self, batch: BatchResult):
         self.batch = batch
+        # 推断项目根路径（用于默认保存目录）
+        self._root = Path(__file__).parent.parent.parent
+
+    def _attach_save_btn(self, fig, title: str = "figure"):
+        """
+        在 Jupyter 环境中，于图片下方显示「💾 Save as PDF」按钮。
+
+        使用方式（在任何绘图函数 plt.show() 之后加一行即可）:
+            plt.show()
+            self._attach_save_btn(plt.gcf(), title)
+        """
+        try:
+            import datetime, re, matplotlib
+            import ipywidgets as widgets
+            from IPython.display import display as _display
+            matplotlib.rcParams['pdf.fonttype'] = 42
+            matplotlib.rcParams['ps.fonttype'] = 42
+
+            save_dir = self._root / "figures"
+            save_dir.mkdir(parents=True, exist_ok=True)
+            slug = re.sub(r'[^\w\-]+', '_', str(title).strip()).strip('_').lower()[:60]
+
+            def _on_save(b, _fig=fig, _dir=save_dir, _slug=slug):
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                fname = _dir / f"{_slug}_{ts}.pdf"
+                _fig.savefig(fname, bbox_inches="tight")
+                b.description = "✅ Saved!"
+                b.button_style = "success"
+                b.disabled = True
+                print(f"[save] → {fname}")
+
+            btn = widgets.Button(
+                description="💾 Save as PDF",
+                button_style="info",
+                icon="download",
+                layout=widgets.Layout(width="180px", height="36px"),
+            )
+            btn.on_click(_on_save)
+            _display(btn)
+        except ImportError:
+            pass  # 非 Jupyter 环境，静默跳过
 
     def _fmt_plain(self, x, pos=None):
         return f"{x:g}"
@@ -874,6 +915,7 @@ class BatchVisualizer:
         if title:
             g.fig.suptitle(title, y=1.02)
         plt.show()
+        self._attach_save_btn(plt.gcf(), title or "plot_pivot")
         return g
 
     def plot_facet(
@@ -935,6 +977,7 @@ class BatchVisualizer:
              ax.grid(True, ls="--", alpha=0.5)
              
         plt.show()
+        self._attach_save_btn(plt.gcf(), "batch_facet")
         return g
 
     def drill_down(self, **params):
@@ -975,6 +1018,7 @@ class BatchVisualizer:
         plt.title(f"Distribution of {y} across Seeds")
         plt.grid(axis="y", ls="--", alpha=0.3)
         plt.show()
+        self._attach_save_btn(plt.gcf(), f"distribution_{y}")
 
     def plot_improvement(
         self,
@@ -1000,6 +1044,7 @@ class BatchVisualizer:
         plt.ylabel("Improvement (%)")
         plt.title(f"{target_version} vs {base_version}: {metric} Reduction")
         plt.show()
+        self._attach_save_btn(plt.gcf(), f"{target_version}_vs_{base_version}_{metric}")
 
     def plot_generic(
         self,
@@ -1056,6 +1101,7 @@ class BatchVisualizer:
             g.fig.suptitle(title, y=1.05, fontsize=14)
 
         plt.show()
+        self._attach_save_btn(plt.gcf(), title or "plot_generic")
         return g
 
     def plot_tradeoff(
@@ -1146,6 +1192,7 @@ class BatchVisualizer:
 
         plt.tight_layout()
         plt.show()
+        self._attach_save_btn(plt.gcf(), title or "plot_tradeoff")
 
     def plot_statistical_summary(
         self,
@@ -1266,7 +1313,11 @@ class BatchVisualizer:
             plt.grid(True, ls="--", alpha=0.4)
             sns.despine(trim=False)
             plt.tight_layout()
+            fig = plt.gcf()
             plt.show()
+            if kwargs.get("return_fig", False):
+                return fig
+            self._attach_save_btn(fig, title)
         else:
             # Facet Mode cleanup
             ax.set_xlabel(x)
@@ -1317,6 +1368,7 @@ class BatchVisualizer:
         ax.grid(True, which="both", ls="--", alpha=0.4)
 
         plt.show()
+        self._attach_save_btn(plt.gcf(), title)
         return ax
 
     # ==========================================
@@ -1463,6 +1515,7 @@ class BatchVisualizer:
 
         plt.tight_layout()
         plt.show()
+        self._attach_save_btn(plt.gcf(), f"main_effects_{metric if isinstance(metric,str) else metric[0]}")
 
     def plot_parallel_coordinates(
         self,
@@ -1740,6 +1793,7 @@ class BatchVisualizer:
                 
             plt.tight_layout()
             plt.show()
+            self._attach_save_btn(plt.gcf(), title or "parallel_coordinates")
 
         return plot_df
 
@@ -1829,6 +1883,7 @@ class BatchVisualizer:
                 ax.grid(True, ls="--", alpha=0.2)
         plt.tight_layout()
         plt.show()
+        self._attach_save_btn(plt.gcf(), "scatter_matrix")
         return axs
 
     def plot_response_surface(
@@ -1956,6 +2011,7 @@ class BatchVisualizer:
 
             plt.tight_layout()
             plt.show()
+            self._attach_save_btn(plt.gcf(), title or f"response_surface_{z}_vs_{x}_{y}")
 
     def plot_auto_interactions(self, metrics: List[str] = None):
         """
@@ -2040,6 +2096,7 @@ class BatchVisualizer:
         plt.title(title if title else f"Distribution of {y}")
         plt.tight_layout()
         plt.show()
+        self._attach_save_btn(plt.gcf(), title or f"distribution_{y}")
 
     def plot_scatter(
         self,
@@ -2084,6 +2141,7 @@ class BatchVisualizer:
         plt.title(title if title else f"{x} vs {y}")
         plt.tight_layout()
         plt.show()
+        self._attach_save_btn(plt.gcf(), title or f"{x}_vs_{y}")
 
     # ==========================================
     # 8. Smart Analysis Capabilities (LHS-Native)
@@ -2155,6 +2213,7 @@ class BatchVisualizer:
         plt.xlabel("Relative Importance (Random Forest)")
         plt.tight_layout()
         plt.show()
+        self._attach_save_btn(plt.gcf(), f"feature_importance_{metric}")
 
         # 6. 输出结论
         print("\n=== Feature Importance Ranking (Top 5) ===")
@@ -2292,3 +2351,87 @@ class BatchVisualizer:
             self._print_case_table(stragglers.head(3), "max_fct")
         else:
             print("[Pass] No pure Hash Collision/Stragglers detected.")
+
+
+# ===========================================================================
+# 模块级工具函数
+# ===========================================================================
+
+def show_with_save(
+    plot_func,
+    *args,
+    save_dir: str = None,
+    **kwargs,
+):
+    """
+    包裹任意 BatchVisualizer 绘图函数，在图下方显示「💾 Save as PDF」按钮。
+    点击后以 {title_slug}_{timestamp}.pdf 格式保存到指定目录（默认 figures/）。
+
+    用法示例：
+        from analysis.data.batch import show_with_save
+        show_with_save(
+            batch.viz.plot_statistical_summary,
+            x='randseed', hue='sleek',
+            metrics=['p99_fct', 'median_fct', 'max_fct'],
+            title='randseed vs sleek (FCT Stats)',
+        )
+    """
+    import datetime
+    import re
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    # 论文级字体设置：字体嵌入为 TrueType，Adobe/Inkscape 中仍可编辑
+    matplotlib.rcParams['pdf.fonttype'] = 42
+    matplotlib.rcParams['ps.fonttype'] = 42
+
+    # 1. 调用绘图函数，截获 fig（通过 return_fig=True 注入）
+    fig = plot_func(*args, return_fig=True, **kwargs)
+
+    if fig is None:
+        # 如果该函数不支持 return_fig，尝试 plt.gcf() 补救
+        fig = plt.gcf()
+        if not fig.get_axes():
+            print("[show_with_save] 无法截获 figure，该绘图函数可能不支持 return_fig。")
+            return
+
+    # 2. 确定保存目录（默认：项目根/figures/）
+    if save_dir is None:
+        save_dir = Path(__file__).parent.parent.parent / "figures"
+    save_path = Path(save_dir)
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    # 3. 自动生成文件名 slug（来自 title 参数）
+    title_str = kwargs.get("title", "figure")
+    slug = re.sub(r'[^\w\-]+', '_', str(title_str).strip()).strip('_').lower()
+    slug = slug[:60]  # 截断过长标题
+
+    # 4. 显示保存按钮
+    try:
+        import ipywidgets as widgets
+        from IPython.display import display
+
+        def _on_save(b):
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = save_path / f"{slug}_{ts}.pdf"
+            fig.savefig(filename, bbox_inches="tight")
+            b.description = "✅ Saved!"
+            b.button_style = "success"
+            b.disabled = True
+            print(f"[save] → {filename}")
+
+        btn = widgets.Button(
+            description="💾 Save as PDF",
+            button_style="info",
+            icon="download",
+            layout=widgets.Layout(width="180px", height="36px"),
+        )
+        btn.on_click(_on_save)
+        display(btn)
+
+    except ImportError:
+        # 非 Jupyter 环境：直接保存
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = save_path / f"{slug}_{ts}.pdf"
+        fig.savefig(filename, bbox_inches="tight")
+        print(f"[save] ipywidgets 不可用，已自动保存 → {filename}")
