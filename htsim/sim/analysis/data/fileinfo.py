@@ -172,10 +172,15 @@ class ExperimentResult:
                 print(f"[Warn] Failed to load snapshot {name}: {e}")
         return None
 
-    def _save_snapshot(self, name: str, df: pd.DataFrame):
+    def _save_snapshot(self, name: str, df: pd.DataFrame, require_success: bool = True):
         """Save DataFrame to parquet snapshot."""
         if df.empty:
             return
+        
+        # [Guard] Only save if the simulation was successful (avoid partial data in cache)
+        if require_success and not self.is_success:
+            return
+
         path = self.snapshot_dir / f"{name}.parquet"
         try:
             df.to_parquet(path, engine="pyarrow", compression="snappy", index=False)
@@ -330,7 +335,13 @@ class ExperimentResult:
     # ==========================
     def _inject_name(self, df: pd.DataFrame, id_col: str) -> pd.DataFrame:
         """从 IdMap 注入名称到 DataFrame，优先使用 IdMap 覆盖现有 Name"""
-        if df.empty or not self.idmap.data:
+        if df.empty:
+            return df
+        
+        if not self.idmap.data:
+            # [Warn] Critical for snapshots: If idmap is missing, do NOT return polluted name-less df
+            # to logic that might save snapshots later.
+            print(f"[Warn] idmap is missing, skipping name injection for {id_col}")
             return df
 
         # 避免 SettingWithCopyWarning
@@ -412,6 +423,12 @@ class ExperimentResult:
         # 1. Try Snapshot
         cached = self._load_snapshot("traffic")
         if cached is not None:
+            # [Dynamic Recovery] If snapshot exists but name column is missing or all NaN,
+            # try to re-inject it now if idmap is available.
+            if "name" not in cached.columns or cached["name"].isna().all():
+                if self.idmap.data:
+                    print(f"[Fix] Snapshot 'traffic' is missing names, re-injecting dynamically...")
+                    return self._inject_name(cached, "location_id")
             return cached
             
         # 2. Parse Log
@@ -426,8 +443,9 @@ class ExperimentResult:
         # 注入位置名称：将 location_id 映射为物理组件名
         df = self._inject_name(df, "location_id")
         
-        # 3. Save Snapshot
-        self._save_snapshot("traffic", df)
+        # 3. Save Snapshot (Only if idmap was present to avoid poisoning)
+        if self.idmap.data:
+            self._save_snapshot("traffic", df)
         return df
 
     @cached_property
@@ -457,7 +475,8 @@ class ExperimentResult:
             df = df.drop(columns=["name"])
             
         # 3. Save Snapshot
-        self._save_snapshot("nic", df)
+        if self.idmap.data:
+            self._save_snapshot("nic", df)
         return df
 
     # ==========================

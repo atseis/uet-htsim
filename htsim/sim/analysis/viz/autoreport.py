@@ -192,12 +192,13 @@ class AutoVisualizer:
             import datetime, re, matplotlib
             import ipywidgets as widgets
             from IPython.display import display as _display
-            matplotlib.rcParams['pdf.fonttype'] = 42
-            matplotlib.rcParams['ps.fonttype'] = 42
+
+            matplotlib.rcParams["pdf.fonttype"] = 42
+            matplotlib.rcParams["ps.fonttype"] = 42
 
             save_dir = self.result.base_dir.parent / "figures"
             save_dir.mkdir(parents=True, exist_ok=True)
-            slug = re.sub(r'[^\w\-]+', '_', str(title).strip()).strip('_').lower()[:60]
+            slug = re.sub(r"[^\w\-]+", "_", str(title).strip()).strip("_").lower()[:60]
 
             def _on_save(b, _fig=fig, _dir=save_dir, _slug=slug):
                 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1021,7 +1022,11 @@ class AutoVisualizer:
         # --- C. 核心增强：叠加瓶颈队列水位 (Secondary Y-axis) ---
         # 从 queue_df 获取该位置的物理水位数据
         q_df = res.active_queue_df
-        if not q_df.empty and "name" in q_df.columns and bottleneck_name in q_df["name"].values:
+        if (
+            not q_df.empty
+            and "name" in q_df.columns
+            and bottleneck_name in q_df["name"].values
+        ):
             # 提取瓶颈队列的时序数据
             bq_data = q_df[q_df["name"] == bottleneck_name].copy()
             bq_data = self._to_us(bq_data)
@@ -1241,7 +1246,7 @@ class AutoVisualizer:
         q_df = res.active_queue_df
         if q_df.empty or "name" not in q_df.columns:
             return None
-            
+
         target_q = q_df[q_df["name"] == bottleneck_name].copy()
         if target_q.empty:
             return None
@@ -1424,7 +1429,7 @@ class AutoVisualizer:
         t_df = res.traffic_df[res.traffic_df["flow_id"] == target_flow_id].copy()
         if t_df.empty:
             return None
-            
+
         if "name" in t_df.columns:
             t_df["hop"] = t_df["name"].apply(get_hop_level)
         else:
@@ -1580,15 +1585,13 @@ class AutoVisualizer:
         # Define Headroom Factor (Total Axis Height relative to Data)
         # We give a bit more than 1.1 to ensure the marker fits comfortably
         Y_HEADROOM = 1.2
-        
+
         # Calculate Max Bytes for Right Axis (CWND / InFlight)
         max_bytes = 0
         if events.get("cwnd_val"):
             max_bytes = max(max_bytes, max(events["cwnd_val"]))
         if events.get("inflight_val"):
             max_bytes = max(max_bytes, max(events["inflight_val"]))
-            
-
 
         # --- Plot Probes (Top Channel) ---
         # --- Plot Probes (Top Channel) ---
@@ -1620,36 +1623,41 @@ class AutoVisualizer:
             ax1.scatter(
                 events["probe_recv_t"],
                 [probe_y] * len(events["probe_recv_t"]),
-                marker="o", # Hollow circle
+                marker="o",  # Hollow circle
                 s=40,
-                facecolors="magenta", # Solid magenta for Arrival (or verify user pref)
-                edgecolors="none", # Let's use solid for arrival to distinguish? Or consistent?
+                facecolors="magenta",  # Solid magenta for Arrival (or verify user pref)
+                edgecolors="none",  # Let's use solid for arrival to distinguish? Or consistent?
                 # User asked for: "Probe Send" (hollow/solid?) -> previous was Send=Solid Blue.
                 # Let's stick to: Send=Hollow Magenta, Arrival=Solid Magenta for clear pair.
                 label="Probe Arrival",
                 zorder=30,
-            )       
+            )
 
             # Draw lines between Probe Send and Arrival
             # Match by Sequence Number
             if events.get("probe_t") and events.get("probe_seq"):
                 send_map = dict(zip(events["probe_seq"], events["probe_t"]))
-                
-                for t_arr, seq_arr in zip(events["probe_recv_t"], events["probe_recv_seq"]):
+
+                for t_arr, seq_arr in zip(
+                    events["probe_recv_t"], events["probe_recv_seq"]
+                ):
                     if seq_arr in send_map:
                         t_send = send_map[seq_arr]
                         # Draw curved line (Arc)
-                        ax1.annotate("",
-                            xy=(t_arr, probe_y), xycoords='data',
-                            xytext=(t_send, probe_y), textcoords='data',
+                        ax1.annotate(
+                            "",
+                            xy=(t_arr, probe_y),
+                            xycoords="data",
+                            xytext=(t_send, probe_y),
+                            textcoords="data",
                             arrowprops=dict(
                                 arrowstyle="-",
                                 color="magenta",
-                                connectionstyle="arc3,rad=-0.5", 
+                                connectionstyle="arc3,rad=-0.5",
                                 linewidth=0.5,
-                                alpha=0.5
+                                alpha=0.5,
                             ),
-                            zorder=29
+                            zorder=29,
                         )
 
         # --- Plot Normal Sends (Filtered) ---
@@ -1701,62 +1709,75 @@ class AutoVisualizer:
                 sink_t = sink_arrivals["time"] * 1e6
                 sink_seq = sink_arrivals["pkt_id"]
 
-                
                 # --- Filter out Probes ---
                 if "pkt_type" in sink_arrivals.columns:
                     # [New] Precise Filtering using Logged Packet Type
                     # Exclude PROBE packets from the "Normal Data Arrival" plot
-                    sink_arrivals_clean = sink_arrivals[sink_arrivals["pkt_type"] != "PROBE"]
+                    sink_arrivals_clean = sink_arrivals[
+                        sink_arrivals["pkt_type"] != "PROBE"
+                    ]
                     sink_t = sink_arrivals_clean["time"] * 1e6
                     sink_seq = sink_arrivals_clean["pkt_id"]
 
                 elif events.get("probe_recv_t"):
                     # [Legacy] Heuristic Greedy Matching
-                    probe_list = list(zip(events["probe_recv_t"], events["probe_recv_seq"]))
-                    
+                    probe_list = list(
+                        zip(events["probe_recv_t"], events["probe_recv_seq"])
+                    )
+
                     # Convert to easier format for searching
                     # We keep original indices to drop later
-                    sink_candidates = [] # list of (time, seq, original_index)
+                    sink_candidates = []  # list of (time, seq, original_index)
                     t_list = sink_t.tolist()
                     s_list = sink_seq.tolist()
                     for i, (t, s) in enumerate(zip(t_list, s_list)):
-                        sink_candidates.append({'t': t, 's': s, 'idx': i, 'matched': False})
-                    
+                        sink_candidates.append(
+                            {"t": t, "s": s, "idx": i, "matched": False}
+                        )
+
                     indices_to_drop = set()
 
                     for pt, ps in probe_list:
                         # Find best match for this specific probe
                         best_match = None
-                        min_diff = 5.0 # Max tolerance 5us
+                        min_diff = 5.0  # Max tolerance 5us
 
                         for cand in sink_candidates:
-                            if cand['matched']:
+                            if cand["matched"]:
                                 continue
-                            if cand['s'] != ps:
+                            if cand["s"] != ps:
                                 continue
-                            
-                            diff = abs(cand['t'] - pt)
+
+                            diff = abs(cand["t"] - pt)
                             if diff < min_diff:
                                 min_diff = diff
                                 best_match = cand
-                        
+
                         if best_match:
-                            best_match['matched'] = True
-                            indices_to_drop.add(best_match['idx'])
-                    
+                            best_match["matched"] = True
+                            indices_to_drop.add(best_match["idx"])
+
                     # Reconstruct filtered lists
                     if indices_to_drop:
-                        print(f"Filtered {len(indices_to_drop)} Probe physical events from Data plot.")
-                        sink_t = [t for i, t in enumerate(t_list) if i not in indices_to_drop]
-                        sink_seq = [s for i, s in enumerate(s_list) if i not in indices_to_drop]
+                        print(
+                            f"Filtered {len(indices_to_drop)} Probe physical events from Data plot."
+                        )
+                        sink_t = [
+                            t for i, t in enumerate(t_list) if i not in indices_to_drop
+                        ]
+                        sink_seq = [
+                            s for i, s in enumerate(s_list) if i not in indices_to_drop
+                        ]
                         sink_t = pd.Series(sink_t, dtype=float)
                         sink_seq = pd.Series(sink_seq, dtype=int)
                     # If no probes were dropped, sink_t and sink_seq remain as original Series.
                     # If all were dropped, then sink_t and sink_seq should be empty Series.
-                    elif not indices_to_drop and len(t_list) > 0: # No probes dropped, but there were sink arrivals
+                    elif (
+                        not indices_to_drop and len(t_list) > 0
+                    ):  # No probes dropped, but there were sink arrivals
                         # sink_t and sink_seq are already correctly assigned from sink_arrivals
                         pass
-                    else: # No sink arrivals or all were probes and dropped
+                    else:  # No sink arrivals or all were probes and dropped
                         sink_t = pd.Series([], dtype=float)
                         sink_seq = pd.Series([], dtype=int)
 
@@ -1881,7 +1902,7 @@ class AutoVisualizer:
         # Map physical drops/trims from Traffic Log directly to Sequence Number
         t_plot = self._to_us(traffic_data)
         physical_events = t_plot[t_plot["event"].isin(["DROP", "TRIM"])]
-        
+
         # [Fix] Filter out PROBE triggers for congestion events too
         if "pkt_type" in physical_events.columns:
             physical_events = physical_events[physical_events["pkt_type"] != "PROBE"]
@@ -1985,7 +2006,7 @@ class AutoVisualizer:
                 q_data = self._to_us(
                     res.active_queue_df[res.active_queue_df["name"] == hotspot_name]
                 )
-                
+
             if not q_data.empty:
                 ax_net.plot(
                     q_data["time"],
@@ -2103,19 +2124,23 @@ class AutoVisualizer:
         # --- Unified Legend (Bottom, Multi-column) ---
         all_lines = lines1 + lines1r + lines2 + lines3
         all_labs = labs1 + labs1r + labs2 + labs3
-        
+
         # Deduplicate
         by_label = dict(zip(all_labs, all_lines))
-        
+
         fig.legend(
             by_label.values(),
             by_label.keys(),
             loc="lower center",
             bbox_to_anchor=(0.5, 0.01),
-            ncol=6, # 4-6 columns as requested
+            ncol=6,  # 4-6 columns as requested
             fontsize=10,
             frameon=True,
-            framealpha=0.9
+            framealpha=0.9,
         )
-        
+
         plt.subplots_adjust(bottom=0.15, right=0.95, top=0.92)
+        # plt.show()
+        title_tag = f"Full Stack Analysis: {flow_name} (LogID: {traffic_logged_id}, InternalID: {flow_name.split('_')[-2] if '_' in flow_name else flow_name})"
+        self._attach_save_btn(fig, title=title_tag)
+        return fig
