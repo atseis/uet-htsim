@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -80,9 +81,11 @@ def extract_yaml_sources(cells: list[dict], image_cell_idx: int, ipynb_dir: str)
     从含图片的 code cell 向上追溯，找到对应的 .yaml 文件路径列表（绝对路径）。
 
     策略：
-    1. 找到该 cell 中调用的 BatchResult 变量名（如 `b3.viz.plot_...`）
-    2. 在该 cell 之前的 code cells 中，找到 `<var> = BatchResult()` 和 `.add_source(yaml_path)` 的声明
-    3. 返回该变量对应的所有 yaml 路径
+    1. 找到该 cell 中调用的 BatchResult 变量名（如 `b3.viz.plot_...`）。
+    2. 遍历从当前 cell 到 cell 0 的所有 code cells。
+    3. 在每个 cell 中寻找 `.add_source(arg)` 调用。
+    4. 对 arg 进行溯源：如果是变量，则从该 arg 出现的 cell 开始向上查找赋值语句。
+    5. 只要找到 BatchResult 的初始化 (var = BatchResult()) 就停止向上追溯。
     """
     img_cell = cells[image_cell_idx]
     source = img_cell["source"]
@@ -97,21 +100,47 @@ def extract_yaml_sources(cells: list[dict], image_cell_idx: int, ipynb_dir: str)
         # fallback: 尝试用 'batch'
         batch_var = "batch"
 
-    # 向上追溯
     yaml_paths = []
-    for j in range(image_cell_idx - 1, -1, -1):
+    # 正则：匹配 .add_source(后面跟着 任何参数 )
+    # 这里的 capture group 需要更宽容，允许 . / 等字符
+    ADD_SOURCE_ANY_RE = re.compile(r'\.add_source\s*\(\s*([\'"]?[^\(\)]+?[\'"]?)\s*(?:,|\))', re.DOTALL)
+
+    # 向上追溯
+    for j in range(image_cell_idx, -1, -1):
         cell = cells[j]
         if cell["type"] != "code":
             continue
         cell_src = cell["source"]
 
+        # 在此 cell 中查找所有 add_source 调用
+        for m in ADD_SOURCE_ANY_RE.finditer(cell_src):
+            arg = m.group(1).strip()
+            yaml_rel = None
+            if (arg.startswith("'") and arg.endswith("'")) or (arg.startswith('"') and arg.endswith('"')):
+                # 字符串字面量
+                yaml_rel = arg[1:-1]
+            else:
+                # 变量名，需要从记录该 add_source 的 cell (j) 开始向上找赋值
+                found_assign = False
+                for k in range(j, -1, -1):
+                    look_cell = cells[k]
+                    if look_cell["type"] != "code": continue
+                    ASSIGN_RE = re.compile(rf'{re.escape(arg)}\s*=\s*[\'"]([^\'"]+\.yaml)[\'"]', re.MULTILINE)
+                    m_assign = ASSIGN_RE.search(look_cell["source"])
+                    if m_assign:
+                        yaml_rel = m_assign.group(1)
+                        found_assign = True
+                        break
+                if not found_assign: 
+                    continue
+
+            if yaml_rel:
+                yaml_abs = os.path.normpath(os.path.join(ipynb_dir, yaml_rel))
+                if yaml_abs not in yaml_paths:
+                    yaml_paths.append(yaml_abs)
+
         # 检查此 cell 是否包含该变量的 BatchResult 初始化
         if re.search(rf'\b{re.escape(batch_var)}\s*=\s*BatchResult\b', cell_src):
-            # 找到所有 add_source 调用
-            for m in ADD_SOURCE_RE.finditer(cell_src):
-                yaml_rel = m.group(1)
-                yaml_abs = os.path.normpath(os.path.join(ipynb_dir, yaml_rel))
-                yaml_paths.append(yaml_abs)
             break  # 找到初始化 cell 即停
 
     return yaml_paths
@@ -413,8 +442,69 @@ def main():
         print("🔍 Dry-run 模式：仅显示分析结果，未写入任何文件。")
         return
 
-    # 实际写入逻辑（供 AI agent 参考，一般由 agent 直接调用各函数）
-    print("💡 提示：实际卡片生成由 AI agent 根据上述信息完成，请参考 SKILL.md 中的工作流程。")
+    if args.dry_run:
+        print("🔍 Dry-run 模式：仅显示分析结果，未写入任何文件。")
+        return
+
+    # 实际写入逻辑
+    new_dir = Path(args.atomic_dir) / "New"
+    new_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # 获取已有的代码卡片（假设只有一个）
+    code_cards = []
+    processed_dir = Path(args.atomic_dir) / "Processed"
+    if processed_dir.exists():
+        for f in processed_dir.glob("Code-*.md"):
+            code_cards.append(f"[[{f.stem}]]")
+
+    # 重新解析 nb_cells 以便提取图片
+    nb_cells = parse_ipynb(args.ipynb)
+
+    total_created = 0
+    for ic in image_cells:
+        cell_idx = ic["cell_index"]
+        cell_data = nb_cells[cell_idx]
+        
+        # 找到对应的 Config 链接
+        config_links = []
+        for yf in ic["yaml_files"]:
+            yaml_name = os.path.basename(yf)
+            # 在 Processed 寻找对应的 Conf 卡片
+            found_conf = False
+            for conf_file in processed_dir.glob("Conf-*.md"):
+                content = conf_file.read_text()
+                if f'source_yaml: "{yaml_name}"' in content or f"source_yaml: '{yaml_name}'" in content:
+                    config_links.append(f"[[{conf_file.stem}]]")
+                    found_conf = True
+                    break
+        
+        for img_idx, img_bytes in enumerate(cell_data["images"]):
+            res_idx = next_card_index(args.atomic_dir, "Res")
+            res_id = f"Res-{res_idx:03d}"
+            
+            # 1. 保存图片
+            img_filename = f"{res_id}-cell_{cell_idx}_img_{img_idx}_{timestamp}.png"
+            img_path = new_dir / img_filename
+            with open(img_path, "wb") as f:
+                f.write(img_bytes)
+            
+            # 2. 生成 Markdown
+            extra = {
+                "source": code_cards + config_links,
+                "source_ipynb": f'"{os.path.basename(args.ipynb)}"',
+                "source_cell": cell_idx
+            }
+            fm = make_frontmatter(["result"], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), extra)
+            
+            md_content = f"{fm}\n\nimg:: ![[{img_filename}]]\n\n## 描述\n\n{ic['description_hint']}\n"
+            
+            md_filename = f"{res_id}-cell_{cell_idx}_img_{img_idx}.md"
+            (new_dir / md_filename).write_text(md_content, encoding="utf-8")
+            total_created += 1
+
+    print(f"🎉 成功生成 {total_created} 个 Result 卡片到 {new_dir}")
 
 
 if __name__ == "__main__":
