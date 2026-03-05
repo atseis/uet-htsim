@@ -13,6 +13,12 @@ Topics:
 ---
 # UEC htsim 协议栈实现深度调研报告 (Master Reference)
 
+> [!NOTE]
+> **现状更新 (2026-03-04)**：
+> - ⚠️ 本文档包含的外链图片 (`s1.vika.cn`, Excalidraw) 可能已不可访问
+> - ⚠️ 文中引用的文件路径 `htsim/sim/uec.cpp` 应为 `src/protocols/uec.cpp`；`htsim/sim/uecpacket.h` 应为 `src/packets/uecpacket.h`
+> - ✅ 核心协议机制描述（NSCC, Pacer, Packet Trimming, PDC, PCIe 等）仍然准确
+
 版本： 2.0 (Stand-alone Final)
 
 适用范围： UEC 传输层机制研究、RICC 算法开发、代码架构参考

@@ -1,3 +1,11 @@
+> [!IMPORTANT]
+> **现状更新 (2026-03-04)**：本报告描述的核心 Bug 仍然存在：
+> - ❌ OOO 分支缺少 `force_ack = true`（`uec.cpp` `processData` 函数，OOO else 分支 L2703-2707）
+> - ❌ `GEN_ACK_TIMER` 仍未实现
+> - ✅ Probe ACK 修复已实施（`set_probe_ack(true)` 已正常工作）
+>
+> 相关文档整合说明：原关联文档 `Analysis_Sender_Retransmission_Logic.md`、`Analysis_UEC_Deadlock_Visual_Proof.md`、`SOP_UEC_Debugging_SilentPacket.md` 已删除（内容完全被本文覆盖）。ACK 机制状态表已合并至 `Mechanism_Analysis_SLEEK.md` §6。
+
 # Bug Analysis Report: The "Silent Packet 11" Issue
 
 ## 1. 问题描述 (Problem Description)

@@ -131,4 +131,26 @@ SLEEK 包含一个主动探测机制，用于在长时间无数据发送或窗�
 3.  **多路径敏感**: 阈值设计是为了过滤乱序，但在低重负载或短流场景下，这个阈值可能过高导致反应迟钝。
 
 ---
+
+## 6. ACK 保底机制实现现状 (ACK Coalescing Mechanisms Status)
+
+> 以下内容整合自原 `UEC_Implementation_Status_ACK_Mechanisms.md`（已删除）。
+
+| 机制 | 规范要求 | 实现状态 | 说明 |
+|:---|:---|:---|:---|
+| **GEN_ACK_TIMER** | 接收端保底定时器，超时强制发 ACK | ❌ **未实现** | `UecSink` 未继承 `EventSource`，无定时器成员。导致死锁的**核心缺失**。 |
+| **AR Flag** | 发送端在最后一个包置位 AR；接收端收到立即 ACK | ✅ 正常 | `processData` 中 `if (pkt.ar()) { force_ack = true; }` |
+| **ACK_On_ECN** | 收到 ECN 标记包立即发 ACK | ✅ 已实现 | `if (ecn \|\| shouldSack() \|\| force_ack)` |
+| **Probe CP** | 发送端超时发 Probe；接收端立即回复 | ✅ 已实现 | `set_probe_ack(true)` (曾有 bug，现已修复) |
+| **Guaranteed Delivery** | 语义层强制 ACK | ⚪ 未建模 | `htsim` 未对上层语义协议建模 |
+
+### 重传机制协同
+
+| 机制 | 触发速度 | 适用场景 | 流末尾有效 | 需要配置 |
+|:---|:---|:---|:---|:---|
+| **NACK/TRIM** | ⚡ 即时 | 交换机拥塞、包损坏 | ✅ | 无需 |
+| **SLEEK (SACK)** | 🚀 快 (需累积) | 中间大规模乱序 | ❌ | 需开启 |
+| **RTO 超时** | 🐌 慢 | 所有未确认场景 | ✅ | 无需 |
+
+---
 **结论**: SLEEK 提供了有效的拥塞下快速恢复能力，但在"Silent Packet"等边界情况（流末尾、单包乱序）下存在设计盲区，必须配合接收端的 `GEN_ACK_TIMER` 作为最后保底。

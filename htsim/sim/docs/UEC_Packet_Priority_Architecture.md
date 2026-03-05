@@ -1,3 +1,6 @@
+> [!NOTE]
+> **现状更新 (2026-03-04)**：§4 中的 Probe Priority 异常问题仍然存在。`DATA_PROBE` 仍为 `PRIO_MID`，未获得 "出生即 Header" 特权。
+
 # UEC Packet Priority Architecture
 
 > **Date**: 2026-01-29
