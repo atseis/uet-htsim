@@ -954,12 +954,12 @@ class AutoVisualizer:
         error_events = ["DROP", "TRIM"]
         plot_df = df[df["event"].isin(error_events)].copy()
 
-        if plot_df.empty:
+        if plot_df.empty or "name" not in plot_df.columns:
             fig, ax = plt.subplots(figsize=(10, 2))
             ax.text(
                 0.5,
                 0.5,
-                "No DROP/TRIM events recorded in Traffic log.",
+                "No DROP/TRIM events or missing location mapping in Traffic log.",
                 ha="center",
                 va="center",
             )
@@ -1021,7 +1021,7 @@ class AutoVisualizer:
         # --- C. 核心增强：叠加瓶颈队列水位 (Secondary Y-axis) ---
         # 从 queue_df 获取该位置的物理水位数据
         q_df = res.active_queue_df
-        if not q_df.empty and bottleneck_name in q_df["name"].values:
+        if not q_df.empty and "name" in q_df.columns and bottleneck_name in q_df["name"].values:
             # 提取瓶颈队列的时序数据
             bq_data = q_df[q_df["name"] == bottleneck_name].copy()
             bq_data = self._to_us(bq_data)
@@ -1086,6 +1086,8 @@ class AutoVisualizer:
             return None
 
         # 筛选核心拥塞事件用于定位
+        if "name" not in traffic_df.columns:
+            return None
         err_df = traffic_df[traffic_df["event"].isin(["DROP", "TRIM"])].copy()
         if err_df.empty:
             # 若无丢包，则退而求其次寻找 DEPART 最密集的点
@@ -1096,8 +1098,11 @@ class AutoVisualizer:
         # 2. 准备对齐数据
         # Panel 1: 队列微分指标 (利用率、负载因子)
         q_df = res.active_queue_df
-        bq_data = q_df[q_df["name"] == bottleneck_name].copy()
-        bq_data = self._to_us(bq_data)  # s -> us
+        if not q_df.empty and "name" in q_df.columns:
+            bq_data = q_df[q_df["name"] == bottleneck_name].copy()
+            bq_data = self._to_us(bq_data)  # s -> us
+        else:
+            bq_data = pd.DataFrame()
 
         # Panel 2: 关联目的节点的 NIC 吞吐
         target_node_id = None
@@ -1220,7 +1225,7 @@ class AutoVisualizer:
         res = self.result
         # 1. 确定瓶颈位置 (Hotspot)
         traffic_df = res.traffic_df
-        if traffic_df.empty:
+        if traffic_df.empty or "name" not in traffic_df.columns:
             return None
 
         # 优先从丢包/裁剪事件找热点名
@@ -1234,6 +1239,9 @@ class AutoVisualizer:
 
         # 2. 获取队列时序数据 (Pressure: max_q)
         q_df = res.active_queue_df
+        if q_df.empty or "name" not in q_df.columns:
+            return None
+            
         target_q = q_df[q_df["name"] == bottleneck_name].copy()
         if target_q.empty:
             return None
@@ -1405,15 +1413,22 @@ class AutoVisualizer:
 
         # 2. 获取背景队列压力数据 (max_q)
         q_df = res.active_queue_df.copy()
-        q_df["hop"] = q_df["name"].apply(get_hop_level)
-        q_df = q_df[q_df["hop"] >= 0]
-        q_df = self._to_us(q_df)  # s -> us
+        if not q_df.empty and "name" in q_df.columns:
+            q_df["hop"] = q_df["name"].apply(get_hop_level)
+            q_df = q_df[q_df["hop"] >= 0]
+            q_df = self._to_us(q_df)  # s -> us
+        else:
+            q_df = pd.DataFrame(columns=["time", "hop", "max_q"])
 
         # 3. 获取特定流的轨迹
         t_df = res.traffic_df[res.traffic_df["flow_id"] == target_flow_id].copy()
         if t_df.empty:
             return None
-        t_df["hop"] = t_df["name"].apply(get_hop_level)
+            
+        if "name" in t_df.columns:
+            t_df["hop"] = t_df["name"].apply(get_hop_level)
+        else:
+            t_df["hop"] = -1
         t_df = self._to_us(t_df)
 
         fig, ax = plt.subplots(figsize=(14, 7))
@@ -1524,7 +1539,7 @@ class AutoVisualizer:
             traffic_data = res.traffic_df[
                 res.traffic_df["flow_id"] == traffic_logged_id
             ].copy()
-            if not traffic_data.empty:
+            if not traffic_data.empty and "name" in traffic_data.columns:
                 # 自动定位瓶颈：丢包/裁剪最多的位置，或者最活跃的位置
                 err_df = traffic_data[traffic_data["event"].isin(["DROP", "TRIM"])]
                 hotspot_name = (
@@ -1965,9 +1980,12 @@ class AutoVisualizer:
         has_net_data = False
         if hotspot_name:
             # Plot Queue Depth
-            q_data = self._to_us(
-                res.active_queue_df[res.active_queue_df["name"] == hotspot_name]
-            )
+            q_data = pd.DataFrame()
+            if not res.active_queue_df.empty and "name" in res.active_queue_df.columns:
+                q_data = self._to_us(
+                    res.active_queue_df[res.active_queue_df["name"] == hotspot_name]
+                )
+                
             if not q_data.empty:
                 ax_net.plot(
                     q_data["time"],
