@@ -1063,6 +1063,10 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
             } else {
                 _probe_timer_when = eventlist().now() + probe_first_trial_time * _base_rtt;
             }
+            if (_probe_timer_handle != eventlist().nullHandle()) {
+                eventlist().cancelPendingSourceByHandle(*this, _probe_timer_handle);
+                _probe_timer_handle = eventlist().nullHandle();
+            }
             _probe_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
         }
         if (pkt.is_probe_ack() && delay < _target_Qdelay) {
@@ -1627,8 +1631,8 @@ void UecSrc::doNextEvent() {
                 cout << timeAsUs(eventlist().now()) << " doNextEvent probe " << _rtx_timeout_pending
                      << " flowid " << _flow.flow_id() << endl;
             }
-            _probe_timer_when =
-                0;  // [Fix] Reset timer timestamp so we don't try to cancel it later
+            _probe_timer_when = 0;
+            _probe_timer_handle = eventlist().nullHandle();
             sendProbe();
         }
     }
@@ -2158,6 +2162,12 @@ void UecSrc::sendProbe() {
 
     _probe_send_time = eventlist().now();
     _probe_timer_when = eventlist().now() + probe_retry_time * _base_rtt;
+
+    // Safety check: if there is currently a pending timer, cancel it before overwriting the handle
+    if (_probe_timer_handle != eventlist().nullHandle()) {
+        eventlist().cancelPendingSourceByHandle(*this, _probe_timer_handle);
+        _probe_timer_handle = eventlist().nullHandle();
+    }
     _probe_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
 }
 
@@ -2474,8 +2484,11 @@ UecSink::UecSink(TrafficLogger* trafficLogger,
       _epsn_rx_bitmap(0),
       _out_of_order_count(0),
       _ack_request(false),
-      _entropy(0) {
+      _entropy(0),
+      _gen_ack_timer_when(0),
+      _has_unacked_data(false) {
     _nodename = "uecSink";  // TBD: would be nice at add nodenum to nodename
+    _gen_ack_timer_handle = EventList::getTheEventList().nullHandle();
     _no_of_ports = no_of_ports;
     _ports.resize(no_of_ports);
     for (uint32_t p = 0; p < _no_of_ports; p++) {
@@ -2513,7 +2526,10 @@ UecSink::UecSink(TrafficLogger* trafficLogger,
       _epsn_rx_bitmap(0),
       _out_of_order_count(0),
       _ack_request(false),
-      _entropy(0) {
+      _entropy(0),
+      _gen_ack_timer_when(0),
+      _has_unacked_data(false) {
+    _gen_ack_timer_handle = eventList.nullHandle();
     if (UecSrc::_receiver_based_cc)
         _pullPacer = new UecPullPacer(linkSpeed, rate_modifier, mtu, eventList, no_of_ports);
     else
@@ -2734,6 +2750,12 @@ void UecSink::processData(UecDataPacket& pkt) {
 
         // ack_packet->sendOn();
         _nic.sendControlPacket(ack_packet, NULL, this);
+    } else {
+        // If we didn't send an ACK immediately, make sure the GEN_ACK_TIMER is running
+        _has_unacked_data = true;
+        if (_gen_ack_timer_handle == getSrc()->eventlist().nullHandle()) {
+            start_gen_ack_timer();
+        }
     }
 }
 
@@ -3178,5 +3200,50 @@ void UecPullPacer::requestPull(UecSink* sink) {
     if (!_active) {
         eventlist().sourceIsPendingRel(*this, 0);
         _active = true;
+    }
+}
+
+void UecSink::start_gen_ack_timer() {
+    // If the timer is already running, cancel it first
+    if (_gen_ack_timer_handle != EventList::getTheEventList().nullHandle()) {
+        EventList::getTheEventList().cancelPendingSourceByHandle(*(EventSource*)_src,
+                                                                 _gen_ack_timer_handle);
+    }
+
+    // The UEC spec uses a general ACK timer, typically around the base RTT or smaller.
+    // Here we'll configure it dynamically based on the link RTT or a configurable constant.
+    simtime_picosec gen_ack_period =
+        UecSrc::_network_rtt ? UecSrc::_network_rtt / 4 : timeFromUs((uint32_t)10);
+    _gen_ack_timer_when = EventList::getTheEventList().now() + gen_ack_period;
+
+    _gen_ack_timer_handle = EventList::getTheEventList().sourceIsPendingGetHandle(
+        *(EventSource*)_src, _gen_ack_timer_when);
+}
+
+void UecSink::gen_ack_timer_expired() {
+    _gen_ack_timer_handle = EventList::getTheEventList().nullHandle();
+
+    if (_has_unacked_data) {
+        if (getSrc()->debug() || getSrc()->flow()->flow_id() == UecSrc::_debug_flowid) {
+            cout << timeAsUs(getSrc()->eventlist().now()) << " flowid " << flowId()
+                 << " GEN_ACK_TIMER expired. Sending explicit cumulative ACK: " << _expected_epsn
+                 << endl;
+        }
+
+        // Generate an explicit ACK packet
+        UecAckPacket* ack_packet =
+            sack(0, sackBitmapBase(_expected_epsn), _expected_epsn, false, false);
+        _nic.sendControlPacket(ack_packet, NULL, this);
+
+        // Reset state
+        _has_unacked_data = false;
+        _accepted_bytes = 0;
+    }
+}
+
+void UecSink::doNextEvent() {
+    if (_gen_ack_timer_when != 0 && _gen_ack_timer_when == getSrc()->eventlist().now()) {
+        _gen_ack_timer_when = 0;
+        gen_ack_timer_expired();
     }
 }

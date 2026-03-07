@@ -196,7 +196,7 @@ class AutoVisualizer:
             matplotlib.rcParams["pdf.fonttype"] = 42
             matplotlib.rcParams["ps.fonttype"] = 42
 
-            save_dir = self.result.base_dir.parent / "figures"
+            save_dir = Path(__file__).resolve().parent.parent.parent / "figures"
             save_dir.mkdir(parents=True, exist_ok=True)
             slug = re.sub(r"[^\w\-]+", "_", str(title).strip()).strip("_").lower()[:60]
 

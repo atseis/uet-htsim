@@ -500,6 +500,9 @@ public:
             uint32_t no_of_ports);
     void receivePacket(Packet& pkt, uint32_t port_num);
 
+    // EventTarget interface
+    void doNextEvent();
+
     void processData(UecDataPacket& pkt);
     void processRts(const UecRtsPacket& pkt);
     void processTrimmed(const UecDataPacket& pkt);
@@ -636,6 +639,13 @@ private:
 
     Stats _stats;
     string _nodename;
+
+    // GEN_ACK_TIMER implementation
+    simtime_picosec _gen_ack_timer_when;
+    EventList::Handle _gen_ack_timer_handle;
+    bool _has_unacked_data;
+    void start_gen_ack_timer();
+    void gen_ack_timer_expired();
 
 public:
     static bool _oversubscribed_cc;

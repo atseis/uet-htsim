@@ -1,0 +1,36 @@
+common:
+  execute: True
+  traffic:
+    type: incast
+    nodes: 432
+    flowsize: "50KB"
+    extrastarttime: 0    
+    prefer_remote: 1     
+    randseed: 4
+
+  simulation:
+    tiers: 3
+    linkspeed: 100000
+    mtu: 4150
+    strat: ecmp_host
+    load_balancing_algo: mixed
+    paths: 64
+    logtime: 0.1
+    end: 2000
+    log:
+      - sink
+      - flow_events
+
+experiments:
+  - name: uec-test-handles
+    exe: htsim_uec
+    protocol: uec
+    traffic:
+      conns: [16]  
+    simulation:
+      queue_type: composite
+      sender_cc_algo: nscc
+      target_q_delay: 12
+      queue_size_bdp_factor: 8
+      sleek: [False]
+      ecn: "20p 80p"
