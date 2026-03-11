@@ -1,5 +1,5 @@
 from ..runner import BUILD_DIR, PROJECT_DIR
-import yaml, itertools, subprocess, os, sys, datetime
+import yaml, itertools, subprocess, os, sys, datetime, shutil
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from . import traffic_patterns, status
@@ -12,7 +12,9 @@ from ..plot import (
     plot_max_fct_vs_msgsize,
     plot_max_cct_vs_algorithm,
 )  # 导入 FCT 绘图函数与 Avg FCT vs Nodes 绘图函数
-from ..utils.calculator import NetworkCalculator # [New] Import Calculator for ECN conversion
+from ..utils.calculator import (
+    NetworkCalculator,
+)  # [New] Import Calculator for ECN conversion
 
 # === 新增 rich 进度条支持 ===
 from rich.progress import (
@@ -97,7 +99,7 @@ def expand_params_tree(params: Dict[str, Any]) -> List[Dict[str, Any]]:
 def build_flags(params: Dict[str, Any]) -> List[str]:
     """将字典转换为命令行参数列表 [-k v ...]"""
     flags: List[str] = []
-    
+
     # [Start] ECN Intelligent Parsing Logic
     # 1. Initialize Calculator if network params are present
     calc = None
@@ -105,17 +107,18 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
         try:
             calc = NetworkCalculator.from_simulation_params(params)
         except Exception:
-            pass # Fallback if params missing
-            
+            pass  # Fallback if params missing
+
     # Helper to resolve single value to packets
     def resolve_val(val):
-        if calc is None: return val # No calculator, pass through (risky if string)
-        
+        if calc is None:
+            return val  # No calculator, pass through (risky if string)
+
         # If string "30KB", "20%" etc.
         if isinstance(val, str):
             val_lower = val.lower()
             if "kb" in val_lower or "mb" in val_lower:
-                unit_str = val_lower.replace("kb", "").replace("mb", "") # naive check
+                unit_str = val_lower.replace("kb", "").replace("mb", "")  # naive check
                 val_num = float(unit_str)
                 # re-delegate to calculator with specific unit
                 # but calculator expects strict unit logic.
@@ -123,13 +126,15 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
                 if "kb" in val_lower:
                     res = calc.convert_ecn(float(val_lower.split("kb")[0]), "kb")
                     return res["Packets"]
-            if "p" in val_lower and "%" not in val_lower: # "20p"
+            if "p" in val_lower and "%" not in val_lower:  # "20p"
                 return int(val_lower.replace("p", ""))
             if "%" in val_lower:
                 num = float(val_lower.replace("%", ""))
-                res = calc.convert_ecn(num, "ratio_queue") # User said "ratio = % of queuesize"
+                res = calc.convert_ecn(
+                    num, "ratio_queue"
+                )  # User said "ratio = % of queuesize"
                 return res["Packets"]
-            
+
             # [Fix] Handle pure numeric strings (e.g. "0.08")
             try:
                 f_val = float(val)
@@ -140,24 +145,24 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
                     return int(f_val)
             except ValueError:
                 pass
-        
+
         # If float/int
         if isinstance(val, (int, float)):
             if 0 < val < 1.0:
                 # User request: "0.2 表示是 queuesize 的 0.2 倍"
-                res = calc.convert_ecn(val, "ratio_queue") 
+                res = calc.convert_ecn(val, "ratio_queue")
                 return res["Packets"]
             else:
-                return int(val) # Packets
-        
-        return val # Fallback
+                return int(val)  # Packets
+
+        return val  # Fallback
 
     # [End] Helper defined
-    
+
     for k, v in params.items():
         if v is None or (isinstance(v, str) and v.lower() == "none"):
             continue
-        
+
         # Special handling for ecn parameter
         if k == "ecn":
             low, high = 0, 0
@@ -168,15 +173,15 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
                     high = resolve_val(parts[1])
                     flags.extend(["-ecn", str(low), str(high)])
             elif isinstance(v, list) and len(v) == 2:
-                 low = resolve_val(v[0])
-                 high = resolve_val(v[1])
-                 flags.extend(["-ecn", str(low), str(high)])
+                low = resolve_val(v[0])
+                high = resolve_val(v[1])
+                flags.extend(["-ecn", str(low), str(high)])
             continue
-            
+
         # Skip consolidated ecn_low/high (handled later)
         if k in ("ecn_low", "ecn_high"):
             continue
-            
+
         if isinstance(v, bool):
             if v:
                 flags.append(f"-{k}")  # 仅在 True 时添加“开关型参数”
@@ -188,7 +193,7 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
         if isinstance(v, (list, dict)):
             continue
         flags.extend([f"-{k}", str(v)])
-    
+
     # Consolidate ecn_low / ecn_high if they exist separately
     e_low = params.get("ecn_low")
     e_high = params.get("ecn_high")
@@ -196,7 +201,7 @@ def build_flags(params: Dict[str, Any]) -> List[str]:
         l_val = resolve_val(e_low)
         h_val = resolve_val(e_high)
         flags.extend(["-ecn", str(l_val), str(h_val)])
-    
+
     return flags
 
 
@@ -313,7 +318,7 @@ def run_experiment(
         if parent.name == "experiments":
             experiments_dir = parent
             break
-    
+
     if experiments_dir:
         # Case A: Standard structure (.../experiments/subdir/test.yaml)
         # We output to sibling .../results/subdir/test
@@ -323,16 +328,16 @@ def run_experiment(
     else:
         # Case B: Fallback (Legacy or custom placement)
         # If input is not inside an "experiments" folder, default to PROJECT_DIR logic
-        # or just place results relative to the script? 
-        # For safety/backward compatibility, we default to Project Root logic if possible, 
+        # or just place results relative to the script?
+        # For safety/backward compatibility, we default to Project Root logic if possible,
         # but if the file is totally outside, we fallback to CWD/results.
         experiments_dir = PROJECT_DIR / "experiments"
         results_base_dir = PROJECT_DIR / "results"
-        
+
         try:
             relative_path = config_file_path_obj.relative_to(experiments_dir)
         except ValueError:
-            # File is outside standard source tree. 
+            # File is outside standard source tree.
             # Treat the file's parent directory as the "experiment group"
             # Output to <FileParent>/../results/<FileNameWithoutExt>
             # Example: /tmp/my_test.yaml -> /tmp/results/my_test
@@ -381,13 +386,13 @@ def run_experiment(
             # 回落到原有笛卡尔积展开（cartesian 或未配置 sampling）
             traffic_variants = expand_params_tree(base_traffic)
             sim_variants = expand_params_tree(base_sim)
-            variants_iter = [(t_var, s_var) for t_var in traffic_variants for s_var in sim_variants]
+            variants_iter = [
+                (t_var, s_var) for t_var in traffic_variants for s_var in sim_variants
+            ]
 
         for t_var, s_var in variants_iter:
             # 用于 variable_keys 识别
-            all_exp_variants.append(
-                {**common_flat, **t_var, **s_var, "name": exp_name}
-            )
+            all_exp_variants.append({**common_flat, **t_var, **s_var, "name": exp_name})
 
             # 实际任务登记在后面统一使用 variable_keys 生成 label
             planned_tasks.append(
@@ -481,18 +486,34 @@ def run_experiment(
             label = task["label_suffix"]
             progress.update(tid, status=f"[cyan]{label}[/cyan]")
 
-            # ================= [新逻辑: 处理 force_rerun 缓存清理] =================
+            # ================= [Force Rerun: 清理所有旧数据] =================
             if force_rerun:
-                # 1. 强制清理 summary.json (ExperimentResult 的核心指标缓存)
-                # 理由：防止重新运行后由于 Parser 未运行或失败而导致分析工具读取旧指标
+                # 清理所有旧数据，确保完全干净的重新运行
+                # 避免 snapshot/plots 等缓存污染新结果
+
+                # 1. summary.json (指标缓存)
                 summary_file = task["out_name"] / "summary.json"
                 if summary_file.exists():
                     summary_file.unlink()
+                    progress.console.print(f"  [dim]🗑 Cleaned: summary.json[/dim]")
 
-                # 2. (可选) 清理旧的 stdout.log 以保证日志纯净
-                # old_stdout = task["out_name"] / "stdout.log"
-                # if old_stdout.exists():
-                #     old_stdout.unlink()
+                # 2. snapshot/ 目录 (分析缓存 - parquet/json.gz)
+                snapshot_dir = task["out_name"] / "snapshot"
+                if snapshot_dir.exists():
+                    shutil.rmtree(snapshot_dir)
+                    progress.console.print(f"  [dim]🗑 Cleaned: snapshot/[/dim]")
+
+                # 3. plots/ 目录 (旧图表)
+                plots_dir = task["out_name"] / "plots"
+                if plots_dir.exists():
+                    shutil.rmtree(plots_dir)
+                    progress.console.print(f"  [dim]🗑 Cleaned: plots/[/dim]")
+
+                # 4. stdout.log (控制台输出)
+                old_stdout = task["out_name"] / "stdout.log"
+                if old_stdout.exists():
+                    old_stdout.unlink()
+                    progress.console.print(f"  [dim]🗑 Cleaned: stdout.log[/dim]")
             # =====================================================================
 
             start_time = datetime.datetime.now()
@@ -504,7 +525,9 @@ def run_experiment(
                 # effective_common = dict(common_flat)
                 # effective_common.pop("execute", None)
                 sim_params.pop("conns", None)
-                sim_params.pop("flowsize", None) # Exclude flowsize from simulation flags
+                sim_params.pop(
+                    "flowsize", None
+                )  # Exclude flowsize from simulation flags
                 # Extract nodes, conns from traffic
                 nodes, conns = task["t_var"]["nodes"], task["t_var"]["conns"]
 
@@ -530,7 +553,9 @@ def run_experiment(
                 # [New] Compute Relative Path for Source YAML (for archiving portability)
                 try:
                     # Make path relative to the directory containing status.yaml (i.e. out_name)
-                    source_yaml_rel = os.path.relpath(config_file_path_obj, start=task["out_name"])
+                    source_yaml_rel = os.path.relpath(
+                        config_file_path_obj, start=task["out_name"]
+                    )
                 except ValueError:
                     # Fallback for Windows different drives
                     source_yaml_rel = str(config_file_path_obj)
