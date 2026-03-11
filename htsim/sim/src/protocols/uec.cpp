@@ -2464,10 +2464,12 @@ const string& UecSinkPort::nodename() {
 ////////////////////////////////////////////////////////////////
 
 UecSink::UecSink(TrafficLogger* trafficLogger,
+                 EventList& eventList,
                  UecPullPacer* pullPacer,
                  UecNIC& nic,
                  uint32_t no_of_ports)
-    : DataReceiver("uecSink"),
+    : EventSource(eventList, "uecSink"),
+      DataReceiver("uecSink"),
       _nic(nic),
       _flow(trafficLogger),
       _pullPacer(pullPacer),
@@ -2504,13 +2506,14 @@ UecSink::UecSink(TrafficLogger* trafficLogger,
 }
 
 UecSink::UecSink(TrafficLogger* trafficLogger,
+                 EventList& eventList,
                  linkspeed_bps linkSpeed,
                  double rate_modifier,
                  uint16_t mtu,
-                 EventList& eventList,
                  UecNIC& nic,
                  uint32_t no_of_ports)
-    : DataReceiver("uecSink"),
+    : EventSource(eventList, "uecSink"),
+      DataReceiver("uecSink"),
       _nic(nic),
       _flow(trafficLogger),
       _expected_epsn(0),
@@ -3206,7 +3209,7 @@ void UecPullPacer::requestPull(UecSink* sink) {
 void UecSink::start_gen_ack_timer() {
     // If the timer is already running, cancel it first
     if (_gen_ack_timer_handle != EventList::getTheEventList().nullHandle()) {
-        EventList::getTheEventList().cancelPendingSourceByHandle(*(EventSource*)_src,
+        EventList::getTheEventList().cancelPendingSourceByHandle(*(EventSource*)this,
                                                                  _gen_ack_timer_handle);
     }
 
@@ -3217,7 +3220,7 @@ void UecSink::start_gen_ack_timer() {
     _gen_ack_timer_when = EventList::getTheEventList().now() + gen_ack_period;
 
     _gen_ack_timer_handle = EventList::getTheEventList().sourceIsPendingGetHandle(
-        *(EventSource*)_src, _gen_ack_timer_when);
+        *(EventSource*)this, _gen_ack_timer_when);
 }
 
 void UecSink::gen_ack_timer_expired() {

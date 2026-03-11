@@ -473,7 +473,7 @@ private:
     const Route* _route;
 };
 
-class UecSink : public DataReceiver {
+class UecSink : public EventSource, public DataReceiver {
 public:
     struct Stats {
         uint64_t received;
@@ -488,14 +488,15 @@ public:
     };
 
     UecSink(TrafficLogger* trafficLogger,
+            EventList& eventList,
             UecPullPacer* pullPacer,
             UecNIC& nic,
             uint32_t no_of_ports);
     UecSink(TrafficLogger* trafficLogger,
+            EventList& eventList,
             linkspeed_bps linkSpeed,
             double rate_modifier,
             uint16_t mtu,
-            EventList& eventList,
             UecNIC& nic,
             uint32_t no_of_ports);
     void receivePacket(Packet& pkt, uint32_t port_num);
