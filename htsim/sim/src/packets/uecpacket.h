@@ -132,6 +132,10 @@ public:
         }
     }
 
+    // Probe payload PSN - the sequence number the probe is asking about
+    inline seq_t probe_payload_psn() const { return _probe_payload_psn; }
+    inline void set_probe_payload_psn(seq_t p) { _probe_payload_psn = p; }
+
 protected:
     seq_t _epsn;
 
@@ -144,6 +148,8 @@ protected:
     bool _fin;
 
     PacketType _packet_type;
+
+    seq_t _probe_payload_psn;  // payload sequence number carried by probe packets
 
     // trim information, need to see if this stays here or goes to separate header.
     std::optional<int32_t> _trim_hop;

@@ -2156,6 +2156,12 @@ void UecSrc::sendProbe() {
     p->set_dst(_dstaddr);
     uint16_t ev = _mp->nextEntropy(_highest_sent, (uint64_t)_cwnd / _mss);
     p->set_pathid(ev);
+
+    // Find the lowest unacked packet to probe about
+    UecBasePacket::seq_t lowest_unacked =
+        _tx_bitmap.empty() ? _highest_sent : _tx_bitmap.begin()->first;
+    p->set_probe_payload_psn(lowest_unacked);
+
     p->flow().logTraffic(*p, *this, TrafficLogger::PKT_CREATESEND);
     // p->sendOn();
     _nic.sendControlPacket(p, this, NULL);
@@ -2587,8 +2593,9 @@ void UecSink::processData(UecDataPacket& pkt) {
                  << " _probe_seqno " << pkt.epsn() << endl;
         }
 
-        UecAckPacket* ack_packet = sack(pkt.path_id(), sackBitmapBase(pkt.epsn()), pkt.epsn(),
-                                        (bool)(pkt.flags() & ECN_CE), pkt.retransmitted());
+        UecAckPacket* ack_packet =
+            sack(pkt.path_id(), sackBitmapBase(pkt.probe_payload_psn()), pkt.epsn(),
+                 (bool)(pkt.flags() & ECN_CE), pkt.retransmitted());
         ack_packet->set_probe_ack(true);
         _nic.sendControlPacket(ack_packet, NULL, this);
         return;
