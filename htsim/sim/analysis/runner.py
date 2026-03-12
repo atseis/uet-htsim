@@ -15,6 +15,51 @@ PARSE_OUTPUT = BUILD_DIR / "parse_output"
 error_log_file = "sim_errors.log"
 
 
+def get_git_branch_or_commit(project_dir: Optional[Path] = None) -> str:
+    """
+    获取当前 git 分支名或 commit id 的前6个字符。
+
+    如果有分支名，返回分支名；否则返回 commit id 的前6个字符。
+    如果不在 git 仓库中，返回 "unknown".
+
+    Args:
+        project_dir: git 仓库的根目录（可选，默认为 PROJECT_DIR）
+
+    Returns:
+        str: 分支名或 commit id 前6字符
+    """
+    if project_dir is None:
+        project_dir = PROJECT_DIR
+
+    try:
+        # 首先尝试获取当前分支名
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        branch = result.stdout.strip()
+
+        # 如果分支名是 "HEAD"，说明处于 detached HEAD 状态，使用 commit id
+        if branch == "HEAD" or not branch:
+            result = subprocess.run(
+                ["git", "rev-parse", "--short=6", "HEAD"],
+                cwd=project_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            return result.stdout.strip()
+
+        return branch
+
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # 不在 git 仓库中或 git 命令失败
+        return "unknown"
+
+
 def run_parse(logfile: str, flags: list = ["-ascii"]) -> str:
     if not PARSE_OUTPUT.is_file():
         raise FileNotFoundError(f"parse_output NOT FOUND: {PARSE_OUTPUT.as_posix()}")
