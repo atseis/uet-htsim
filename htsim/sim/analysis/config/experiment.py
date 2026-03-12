@@ -1,4 +1,4 @@
-from ..runner import BUILD_DIR, PROJECT_DIR
+from ..runner import BUILD_DIR, PROJECT_DIR, get_git_branch_or_commit
 import yaml, itertools, subprocess, os, sys, datetime, shutil
 from typing import Dict, Any, List, Optional
 from pathlib import Path
@@ -323,7 +323,9 @@ def run_experiment(
         # Case A: Standard structure (.../experiments/subdir/test.yaml)
         # We output to sibling .../results/subdir/test
         project_root = experiments_dir.parent
-        results_base_dir = project_root / "results"
+        # [New] Add git branch/commit to results path
+        branch_or_commit = get_git_branch_or_commit()
+        results_base_dir = project_root / "results" / branch_or_commit
         relative_path = config_file_path_obj.relative_to(experiments_dir)
     else:
         # Case B: Fallback (Legacy or custom placement)
@@ -332,7 +334,9 @@ def run_experiment(
         # For safety/backward compatibility, we default to Project Root logic if possible,
         # but if the file is totally outside, we fallback to CWD/results.
         experiments_dir = PROJECT_DIR / "experiments"
-        results_base_dir = PROJECT_DIR / "results"
+        # [New] Add git branch/commit to results path
+        branch_or_commit = get_git_branch_or_commit()
+        results_base_dir = PROJECT_DIR / "results" / branch_or_commit
 
         try:
             relative_path = config_file_path_obj.relative_to(experiments_dir)
@@ -341,7 +345,9 @@ def run_experiment(
             # Treat the file's parent directory as the "experiment group"
             # Output to <FileParent>/../results/<FileNameWithoutExt>
             # Example: /tmp/my_test.yaml -> /tmp/results/my_test
-            results_base_dir = config_file_path_obj.parent.parent / "results"
+            results_base_dir = (
+                config_file_path_obj.parent.parent / "results" / branch_or_commit
+            )
             relative_path = Path(config_file_path_obj.stem)
 
     output_dir_name = relative_path.with_suffix("").as_posix()
