@@ -1,0 +1,44 @@
+report: {title: GEN_ACK_TIMER 修复验证, date: '2026-03-11'}
+modules:
+  enabled: [text_section, code_comparison, experiment_config, data_table, chart_bar, flowchart]
+  order: [text_section, code_comparison, experiment_config, data_table, chart_bar, flowchart]
+  config:
+    text_section: {title: 📋 实验摘要, content: 本报告验证了 UEC 协议接收方 GEN_ACK_TIMER 定时器的修复效果。修复前，定时器被错误注册到发送方，导致完全失效；修复后，定时器正确注册到接收方，能够在其他
+        ACK 触发条件失效时作为时间兜底机制。}
+    code_comparison: {title: 💻 代码修复对比, buggy_title: 修复前 (BUG), fixed_title: 修复后 (FIX), buggy_code: '_gen_ack_timer_handle
+        = sourceIsPendingGetHandle(*(EventSource*)_src, ...);  // ❌ 错误', fixed_code: '_gen_ack_timer_handle = sourceIsPendingGetHandle(*(EventSource*)this,
+        ...);  // ✅ 正确', buggy_issue: 定时器注册到发送方 (_src)，导致完全失效, fixed_improvement: 定时器注册到接收方 (this)，正常工作}
+    experiment_config:
+      title: 🔬 实验环境
+      items: {拓扑: FatTree K=12 (432 节点), 流量模式: Incast (96 对 1), 流大小: 12 KB (~3 包), CC 算法: NSCC (Receiver-based), 队列类型: Composite
+          with ECN, Target Queue Delay: 12 μs}
+    data_table:
+      title: 📊 小流场景实验结果
+      headers: [指标, 修复前, 修复后, 差异]
+      rows:
+      - [P50 延迟 (μs), '47', '47', 0%]
+      - [P90 延迟 (μs), '85', '85', 0%]
+      - [P99 延迟 (μs), '94', '94', 0%]
+      - [总流数, '96', '96', '0']
+    chart_bar:
+      chart_id: performanceChart
+      title: 性能指标对比
+      x_label: 指标
+      y_label: 延迟 (μs)
+      labels: [P50, P90, P99]
+      datasets:
+      - label: 修复前
+        data: [47, 85, 94]
+        backgroundColor: rgba(231, 76, 60, 0.7)
+      - label: 修复后
+        data: [47, 85, 94]
+        backgroundColor: rgba(39, 174, 96, 0.7)
+    flowchart:
+      title: ⚙️ GEN_ACK_TIMER 工作机制
+      steps:
+      - {color: '#3498db', icon: ▶, text: 包到达 → 不满足 ACK 条件}
+      - {color: '#3498db', icon: ▶, text: 启动定时器 (10μs)}
+      - {color: '#e74c3c', icon: ❌, text: '定时器到期 → 调用 UecSrc::doNextEvent() → 不处理 GEN_ACK'}
+      - {color: '#27ae60', icon: ✅, text: '定时器到期 → 调用 UecSink::doNextEvent() → gen_ack_timer_expired() → 强制 ACK'}
+data_sources: {buggy_log: results/exp_comparison/buggy_with_traffic.log, fixed_log: results/exp_comparison/fixed_with_traffic.log}
+config_file: config-example.yaml

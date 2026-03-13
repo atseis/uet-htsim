@@ -29,7 +29,8 @@ void UecSinkLoggerSampling::doNextEvent() {
             else
                 rate = 0;
 
-            _logfile->writeRecord(_sink_type, sink->get_id(), _event_type, sink->cumulative_ack(),
+            _logfile->writeRecord(_sink_type, static_cast<DataReceiver*>(sink)->get_id(),
+                                  _event_type, sink->cumulative_ack(),
                                   /*deltaB>0?(deltaSnd * 100000 / deltaB):0*/
                                   sink->reorder_buffer_size(), rate);
 

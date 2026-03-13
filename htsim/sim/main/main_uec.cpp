@@ -853,11 +853,11 @@ int main(int argc, char** argv) {
             }
 
             if (receiver_driven)
-                uec_snk = new UecSink(NULL, pacers[dest].get(), *nics.at(dest), ports);
+                uec_snk = new UecSink(NULL, eventlist, pacers[dest].get(), *nics.at(dest), ports);
             else  // each connection has its own pacer, so receiver driven mode does not kick in!
-                uec_snk = new UecSink(NULL, linkspeed, 1.1,
+                uec_snk = new UecSink(NULL, eventlist, linkspeed, 1.1,
                                       UecBasePacket::unquantize(UecSink::_credit_per_pull),
-                                      eventlist, *nics.at(dest), ports);
+                                      *nics.at(dest), ports);
 
             flowmap[uec_src->flowId()] = {uec_src, uec_snk};
 
