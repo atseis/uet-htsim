@@ -1058,7 +1058,7 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
                          << " an assert soon" << endl;
                 }
             }
-            eventlist().cancelPendingSourceByHandle(*this, _probe_timer_handle);
+            // Don't cancel - just reset timer. Old timer will be ignored in doNextEvent.
             _probe_timer_when = 0;
             _probe_timer_handle = eventlist().nullHandle();
         }
@@ -1068,10 +1068,7 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
             } else {
                 _probe_timer_when = eventlist().now() + probe_first_trial_time * _base_rtt;
             }
-            if (_probe_timer_handle != eventlist().nullHandle()) {
-                eventlist().cancelPendingSourceByHandle(*this, _probe_timer_handle);
-                _probe_timer_handle = eventlist().nullHandle();
-            }
+            // Schedule new timer - old one will be ignored if it fires
             _probe_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
         }
         if (pkt.is_probe_ack() && delay < _target_Qdelay) {
@@ -1093,10 +1090,7 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
             // Reset probe timer to retry
             if (cum_ack < _highest_sent || _backlog > 0) {
                 _probe_timer_when = eventlist().now() + probe_retry_time * _base_rtt;
-                if (_probe_timer_handle != eventlist().nullHandle()) {
-                    eventlist().cancelPendingSourceByHandle(*this, _probe_timer_handle);
-                    _probe_timer_handle = eventlist().nullHandle();
-                }
+                // Schedule new timer - old one will be ignored if it fires
                 _probe_timer_handle =
                     eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
             }
@@ -2273,11 +2267,8 @@ void UecSrc::sendProbe() {
     // Pause RTO timer when Probe is sent (UEC spec §3.5.15.4.3)
     pauseRTO();
 
-    // Safety check: if there is currently a pending timer, cancel it before overwriting the handle
-    if (_probe_timer_handle != eventlist().nullHandle()) {
-        eventlist().cancelPendingSourceByHandle(*this, _probe_timer_handle);
-        _probe_timer_handle = eventlist().nullHandle();
-    }
+    // Schedule new probe timer
+    // Note: We don't cancel old timer - if it fires, doNextEvent checks _probe_timer_when
     _probe_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
 }
 
@@ -3318,11 +3309,8 @@ void UecPullPacer::requestPull(UecSink* sink) {
 }
 
 void UecSink::start_gen_ack_timer() {
-    // If the timer is already running, cancel it first
-    if (_gen_ack_timer_handle != EventList::getTheEventList().nullHandle()) {
-        EventList::getTheEventList().cancelPendingSourceByHandle(*(EventSource*)this,
-                                                                 _gen_ack_timer_handle);
-    }
+    // Don't cancel old timer - if it fires, doNextEvent checks _gen_ack_timer_when
+    // Just schedule new timer
 
     // The UEC spec uses a general ACK timer, typically around the base RTT or smaller.
     // Here we'll configure it dynamically based on the link RTT or a configurable constant.
