@@ -2422,8 +2422,13 @@ void UecSrc::rtxTimerExpired() {
     assert(eventlist().now() == _rtx_timeout);
     clearRTO();
 
+    // If _send_times is empty, all packets have been acknowledged (possibly
+    // via probe-based recovery while RTO was paused). Nothing to do.
+    if (_send_times.empty()) {
+        return;
+    }
+
     auto first_entry = _send_times.begin();
-    assert(first_entry != _send_times.end());
     auto seqno = first_entry->second;
 
     auto send_record = _tx_bitmap.find(seqno);
