@@ -1091,7 +1091,13 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
             // Reset probe timer to retry (already done above)
         }
 
-        runSleek(ooo, cum_ack);
+        // UEC spec §3.5.15.4.3: Only runSleek for non-Probe ACKs or when not in probe-based
+        // recovery When Probe ACK is received, loss recovery is already triggered above based on
+        // RTT comparison When regular ACK is received, we should not trigger loss recovery via OOO
+        // threshold
+        if (!pkt.is_probe_ack()) {
+            runSleek(ooo, cum_ack);
+        }
     }
 
     stopSpeculating();
