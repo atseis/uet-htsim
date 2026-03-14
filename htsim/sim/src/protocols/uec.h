@@ -445,9 +445,11 @@ private:
     /******** Probe parameters *********/
     static int probe_first_trial_time;
     static int probe_retry_time;
+    static constexpr int MAX_TAIL_LOSS_RETX = 5;  // UEC spec default
     simtime_picosec _probe_timer_when = 0;
     simtime_picosec _probe_seqno = 0;
     simtime_picosec _probe_send_time = 0;
+    int _tail_loss_retx_cnt = 0;  // Current retry count for tail loss probes
     EventList::Handle _probe_timer_handle;
     /******** END Probe parameters *********/
 

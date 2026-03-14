@@ -882,6 +882,11 @@ bool UecSrc::validateSendTs(UecBasePacket::seq_t acked_psn, bool rtx_echo) {
 void UecSrc::processAck(const UecAckPacket& pkt) {
     _nic.logReceivedCtrl(pkt.size());
 
+    // Clear tail loss retry counter on any ACK (UEC spec §3.5.15.4.3)
+    if (_tail_loss_retx_cnt > 0) {
+        _tail_loss_retx_cnt = 0;
+    }
+
     auto cum_ack = pkt.cumulative_ack();
     bool rtx_echo = pkt.rtx_echo();
     // handle flight_size based on recvd_bytes in packet.
@@ -1076,6 +1081,24 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
             if (_flow.flow_id() == _debug_flowid) {
                 cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
                      << " enter_loss_probe " << " _avg_delay " << timeAsUs(_avg_delay) << endl;
+            }
+        } else if (pkt.is_probe_ack() && delay >= _target_Qdelay) {
+            // RTT > target_qdelay: network congested, retransmit probe
+            // according to UEC specification §3.5.15.4.3
+            if (_flow.flow_id() == _debug_flowid) {
+                cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
+                     << " probe_rtt_high " << timeAsUs(delay) << " target "
+                     << timeAsUs(_target_Qdelay) << " - rescheduling probe" << endl;
+            }
+            // Reset probe timer to retry
+            if (cum_ack < _highest_sent || _backlog > 0) {
+                _probe_timer_when = eventlist().now() + probe_retry_time * _base_rtt;
+                if (_probe_timer_handle != eventlist().nullHandle()) {
+                    eventlist().cancelPendingSourceByHandle(*this, _probe_timer_handle);
+                    _probe_timer_handle = eventlist().nullHandle();
+                }
+                _probe_timer_handle =
+                    eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
             }
         }
         runSleek(ooo, cum_ack);
@@ -1507,6 +1530,11 @@ void UecSrc::runSleek(uint32_t ooo, UecBasePacket::seq_t cum_ack) {
 void UecSrc::processNack(const UecNackPacket& pkt) {
     _nic.logReceivedCtrl(pkt.size());
     _stats.nacks_received++;
+
+    // Clear tail loss retry counter on NACK (UEC spec §3.5.15.4.3)
+    if (_tail_loss_retx_cnt > 0) {
+        _tail_loss_retx_cnt = 0;
+    }
 
     // auto pullno = pkt.pullno();
     // handlePull(pullno);
@@ -2146,11 +2174,22 @@ mem_b UecSrc::sendRtxPacket(const Route& route) {
 }
 
 void UecSrc::sendProbe() {
+    // Check if max retry count reached (UEC spec §3.5.15.4.3)
+    if (_tail_loss_retx_cnt >= MAX_TAIL_LOSS_RETX) {
+        if (_flow.flow_id() == _debug_flowid) {
+            cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
+                 << " sendProbe MAX_RETX reached " << _tail_loss_retx_cnt
+                 << " - stopping probes, let RTO handle" << endl;
+        }
+        return;
+    }
+
     if (_flow.flow_id() == _debug_flowid) {
         cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id() << " sendProbe "
-             << " _probe_seqno " << _probe_seqno + 1 << endl;
+             << " _probe_seqno " << _probe_seqno + 1 << " retry " << _tail_loss_retx_cnt << endl;
     }
     _probe_seqno++;
+    _tail_loss_retx_cnt++;  // Increment retry count
     auto* p = UecDataPacket::newpkt(_flow, NULL, _probe_seqno, _hdr_size, UecBasePacket::DATA_PROBE,
                                     0, _dstaddr);
     p->set_dst(_dstaddr);
@@ -2158,9 +2197,11 @@ void UecSrc::sendProbe() {
     p->set_pathid(ev);
 
     // Find the lowest unacked packet to probe about
+    // Align to 8 bytes as per UEC spec: [SRC_LOWEST_NOT_RCVD_PSN[31:3], 0b000]
     UecBasePacket::seq_t lowest_unacked =
         _tx_bitmap.empty() ? _highest_sent : _tx_bitmap.begin()->first;
-    p->set_probe_payload_psn(lowest_unacked);
+    UecBasePacket::seq_t aligned_psn = (lowest_unacked >> 3) << 3;
+    p->set_probe_payload_psn(aligned_psn);
 
     p->flow().logTraffic(*p, *this, TrafficLogger::PKT_CREATESEND);
     // p->sendOn();
