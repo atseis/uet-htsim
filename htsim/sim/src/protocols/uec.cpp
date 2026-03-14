@@ -1644,6 +1644,21 @@ void UecSrc::processPull(const UecPullPacket& pkt) {
 
 void UecSrc::doNextEvent() {
     if (_rtx_timeout_pending && eventlist().now() == _rtx_timeout) {
+        // Check if RTO is paused (during Probe transmission)
+        if (_rto_paused) {
+            // RTO fired while paused - reschedule it
+            if (_rto_remaining_when_paused > 0) {
+                _rtx_timeout = eventlist().now() + _rto_remaining_when_paused;
+                _rto_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _rtx_timeout);
+                if (_rto_timer_handle == eventlist().nullHandle()) {
+                    _rtx_timeout_pending = false;
+                }
+            } else {
+                _rtx_timeout_pending = false;
+            }
+            return;
+        }
+
         clearRTO();
         assert(_logger == 0);
 
@@ -2071,15 +2086,16 @@ void UecSrc::cancelRTO() {
 
 void UecSrc::pauseRTO() {
     // Pause RTO timer when sending Probe (UEC spec §3.5.15.4.3)
+    // Instead of canceling the timer (which can cause assertion failures),
+    // we just mark it as paused and record remaining time
     if (_rtx_timeout_pending && !_rto_paused) {
         _rto_paused = true;
         _rto_remaining_when_paused = _rtx_timeout - eventlist().now();
         if (_rto_remaining_when_paused < 0)
             _rto_remaining_when_paused = 0;
 
-        eventlist().cancelPendingSourceByHandle(*this, _rto_timer_handle);
-        _rto_timer_handle = eventlist().nullHandle();
-
+        // Note: We don't cancel the timer here - just mark as paused
+        // The timer will still fire but will be ignored if still paused
         if (_debug_src) {
             cout << timeAsUs(eventlist().now()) << " " << _flow.str()
                  << " RTO paused, remaining: " << timeAsUs(_rto_remaining_when_paused) << endl;
@@ -2092,6 +2108,7 @@ void UecSrc::resumeRTO() {
     if (_rto_paused) {
         _rto_paused = false;
         if (_rto_remaining_when_paused > 0) {
+            // Restart the timer with remaining time
             _rtx_timeout = eventlist().now() + _rto_remaining_when_paused;
             _rto_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _rtx_timeout);
             if (_rto_timer_handle == eventlist().nullHandle()) {
