@@ -119,6 +119,37 @@ class BatchResult:
 
         return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
+    def get_completion_df(self) -> pd.DataFrame:
+        """
+        [New] 获取所有实验的完成率信息表。
+
+        Returns:
+            DataFrame with columns:
+            - _uid: 实验唯一ID
+            - expected_flows: 期望流数
+            - completed_flows: 实际完成流数
+            - completion_rate: 完成率 (0.0 - 1.0)
+            - is_complete: 是否全部完成
+        """
+        rows = []
+        for uid, entry in self.experiments.items():
+            res = entry["result"]
+            info = res.completion_info
+            rows.append(
+                {
+                    "_uid": uid,
+                    "expected_flows": info["expected_flows"],
+                    "completed_flows": info["completed_flows"],
+                    "completion_rate": info["completion_rate"],
+                    "is_complete": info["is_complete"],
+                }
+            )
+
+        if not rows:
+            return pd.DataFrame()
+
+        return pd.DataFrame(rows)
+
     def get_summary_df(self, metrics: List[str]) -> pd.DataFrame:
         """
         【修改】汇总大表：自动从 ExperimentResult.params 提取全量变量，
@@ -896,6 +927,84 @@ class BatchVisualizer:
         self.batch = batch
         # 推断项目根路径（用于默认保存目录）
         self._root = Path(__file__).parent.parent.parent
+        # [New] 初始化完成率信息
+        self._completion_df = None
+        self._completion_warning_shown = False
+
+    def _get_completion_df(self) -> pd.DataFrame:
+        """[Lazy Load] 获取完成率信息表"""
+        if self._completion_df is None:
+            self._completion_df = self.batch.get_completion_df()
+        return self._completion_df
+
+    def check_completion(
+        self, threshold: float = 0.9, verbose: bool = True
+    ) -> pd.DataFrame:
+        """
+        [New] 检查并报告低完成率实验。
+
+        Args:
+            threshold: 完成率阈值，低于此值视为未完成 (默认 0.9 = 90%)
+            verbose: 是否打印警告信息
+
+        Returns:
+            DataFrame of experiments with completion_rate < threshold
+        """
+        df = self._get_completion_df()
+        if df.empty:
+            return df
+
+        # 找出低完成率的实验
+        low_completion = df[df["completion_rate"] < threshold].copy()
+
+        if not low_completion.empty and verbose and not self._completion_warning_shown:
+            print(
+                f"\n⚠️  [完成率警告] 发现 {len(low_completion)}/{len(df)} 个实验完成率低于 {threshold:.0%}"
+            )
+            print("=" * 80)
+
+            # 获取实验参数用于显示
+            param_df = self.batch.get_summary_df([])
+
+            for idx, row in low_completion.head(10).iterrows():
+                uid = row["_uid"]
+                rate = row["completion_rate"]
+                completed = row["completed_flows"]
+                expected = row["expected_flows"]
+
+                # 获取该实验的参数信息
+                info_parts = []
+                if not param_df.empty and uid in param_df["_uid"].values:
+                    exp_params = param_df[param_df["_uid"] == uid].iloc[0]
+                    # 添加关键参数用于识别
+                    for col in [
+                        "conns",
+                        "flows",
+                        "version",
+                        "randseed",
+                        "conns_incast",
+                        "conns_outcast",
+                    ]:
+                        if col in exp_params and pd.notna(exp_params[col]):
+                            info_parts.append(f"{col}={exp_params[col]}")
+
+                info_str = ", ".join(info_parts)
+                uid_short = str(uid)[-50:]  # 截短 UID
+
+                print(f"   • {uid_short}")
+                print(
+                    f"     完成率: {rate:.1%} ({completed}/{expected} 流){' [' + info_str + ']' if info_str else ''}"
+                )
+
+            if len(low_completion) > 10:
+                print(f"   ... 还有 {len(low_completion) - 10} 个实验未显示")
+
+            print("=" * 80)
+            print("提示: 这些实验的 FCT 统计可能不完整，分析时请注意！\n")
+
+            self._completion_warning_shown = True
+
+        return low_completion
 
     def _attach_save_btn(self, fig, title: str = "figure"):
         """
@@ -955,6 +1064,8 @@ class BatchVisualizer:
         ref_line: Optional[float] = None,  # [New] Reference Line
         title: Optional[str] = None,
         y_log: bool = False,
+        check_completion: bool = True,  # [New] 是否检查完成率
+        completion_threshold: float = 0.9,  # [New] 完成率阈值
         **sns_kwargs,
     ):
         """
@@ -966,6 +1077,10 @@ class BatchVisualizer:
         :param hue: 聚类变量
         :param col/row: 分面变量
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         # Determine metrics to fetch
         targets = metrics or (y if isinstance(y, list) else [y])
         if y2:
@@ -1182,11 +1297,17 @@ class BatchVisualizer:
         hue: Optional[str] = None,
         kind: str = "box",
         filters: Dict = None,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
         展示指标的分布情况。kind 支持 'box', 'violin', 'strip'。
         非常适合展示 Sleek 如何压缩了 Baseline 的长尾分布。
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         df = self.batch.get_summary_df([y])
         if filters:
             for k, v in filters.items():
@@ -1210,11 +1331,17 @@ class BatchVisualizer:
         target_version: str,
         metric: str = "max_fct",
         groupby: str = "randseed",
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
-        计算并画出“优化比例”图。
+        计算并画出"优化比例"图。
         Y轴 = (Base - Target) / Base * 100 %
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         df = self.batch.get_summary_df([metric])
         # 提取两组数据并按种子对齐
         base_data = df[df["version"] == base_version].set_index(groupby)[metric]
@@ -1242,12 +1369,18 @@ class BatchVisualizer:
         filters: Dict = None,
         title: str = None,
         y_scale: str = "linear",
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
         **kwargs,
     ):
         """
         高阶通用绘图接口。
         支持：置信区间(CI)、分面(Facet)、多算法对比(Hue)。
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         df = self.batch.get_summary_df(metrics or [y])
         if df.empty:
             print("[!] Summary DataFrame is empty. Check filters or paths.")
@@ -1299,11 +1432,17 @@ class BatchVisualizer:
         title: str = None,
         labels: Tuple[str, str, str] = None,
         data: pd.DataFrame = None,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
         [新增] 双轴权衡图 (Dual-Axis Plot)。
         支持自定义 DataFrame 输入 (data) 以便预处理指标单位。
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         # 1. 准备数据
         if data is not None:
             df = data.copy()
@@ -1402,6 +1541,8 @@ class BatchVisualizer:
         hue: str = "version",
         metrics: Optional[List[str]] = None,
         title: str = "Scalability Analysis: FCT Statistics",
+        check_completion: bool = True,  # [New] 是否检查完成率
+        completion_threshold: float = 0.9,  # [New] 完成率阈值
         **kwargs,
     ):
         """
@@ -1409,6 +1550,10 @@ class BatchVisualizer:
         支持作为独立函数调用，也支持被 plot_facet 调用 (作为 map_dataframe 的 func)。
         """
         import matplotlib.ticker as ticker
+
+        # [New] 检查完成率（在 FacetGrid 模式下不重复检查）
+        if check_completion and kwargs.get("data") is None:
+            self.check_completion(threshold=completion_threshold)
 
         # [Compatibility Fix] Handle FacetGrid injections
         # FacetGrid passes 'color', 'label' etc. We ignore them or use them if needed.
@@ -1531,11 +1676,17 @@ class BatchVisualizer:
         hue: str = "version",
         filters: Optional[Dict] = None,
         title: str = "Batch FCT CDF Comparison",
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
         【增加】批量 FCT CDF 叠加图。
         每一条曲线代表一个分组（如不同算法版本）在所有种子下的流分布总和。
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         import matplotlib.pyplot as plt
         import seaborn as sns
         import matplotlib.ticker as ticker
@@ -1585,6 +1736,8 @@ class BatchVisualizer:
         agg: str = "mean",
         filters: Dict = None,
         sharey: bool = True,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
         主效应图：逐个因子画 (factor -> metric) 的聚合曲线。
@@ -1595,6 +1748,9 @@ class BatchVisualizer:
         - agg: 聚合方式，'mean' | 'median' | 'max' 等
         - filters: 额外筛选条件（精确匹配）
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
         raw_metrics = [metric] if isinstance(metric, str) else metric
         expanded_metrics = []
 
@@ -1747,6 +1903,8 @@ class BatchVisualizer:
         normalize: bool = True,
         highlight: Dict = None,
         title: str = None,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
         平行坐标图：同时查看多个因子 + 指标的关系，用于 LHS/正交实验整体形状观察。
@@ -1757,6 +1915,9 @@ class BatchVisualizer:
         - sample: 随机下采样到指定行数（None 表示不过滤）
         - normalize: 是否对每列进行 Min-Max 归一化 (解决y轴跨度不一致问题)
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
         cols = list(set(factors + metrics + ([hue] if hue else [])))
         df = self.batch.get_summary_df(list(set(metrics)))
         if df.empty:
@@ -2087,6 +2248,8 @@ class BatchVisualizer:
         columns: List[str],
         filters: Dict = None,
         sample: Optional[int] = 500,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
         散点矩阵：快速观察若干参数/指标之间的相关性。
@@ -2094,6 +2257,10 @@ class BatchVisualizer:
         - filters: 精确筛选条件
         - sample: 下采样行数（避免点过多），None 表示不过滤
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         df = self.batch.get_summary_df([])
         if df.empty:
             print("[!] Summary DataFrame is empty.")
@@ -2140,6 +2307,8 @@ class BatchVisualizer:
         levels: int = 15,
         scatter_alpha: float = 0.6,
         show_points: bool = True,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
     ):
         """
         响应面图 (Response Surface): 使用三角剖分 (Triangulation) 绘制等高线填充图。
@@ -2151,6 +2320,9 @@ class BatchVisualizer:
         :param filters: 筛选条件
         :param show_points: 是否叠加显示原始采样点
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
         df = self.batch.get_summary_df([z])
         if df.empty:
             print("[!] Summary DataFrame is empty.")
@@ -2280,12 +2452,21 @@ class BatchVisualizer:
             plt.show()
             self._attach_save_btn(_fig, title or f"response_surface_{z}_vs_{x}_{y}")
 
-    def plot_auto_interactions(self, metrics: List[str] = None):
+    def plot_auto_interactions(
+        self,
+        metrics: List[str] = None,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
+    ):
         """
         [新增] 智能交互分析：自动检测并可视化领域内已知的关键参数对。
         目前的通用扫描往往忽略了参数间的物理耦合（如 ECN 双阈值）。
         此函数会自动寻找已知的耦合参数，如果它们都在变化，则绘制响应面图。
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         varying = self.batch.get_varying_params()
         target_metric = metrics[0] if metrics else "p99_fct"
 
@@ -2334,6 +2515,8 @@ class BatchVisualizer:
         kind: str = "cdf",
         filters: Dict = None,
         title: str = None,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
         **sns_kwargs,
     ):
         """
@@ -2341,6 +2524,10 @@ class BatchVisualizer:
         :param y: 指标名称 (如 'p99_fct')
         :param kind: 'hist', 'kde', 'cdf', 'box', 'violin'
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         df = self.batch.get_summary_df([y])
         if filters:
             for k, v in filters.items():
@@ -2380,11 +2567,17 @@ class BatchVisualizer:
         size: str = None,
         filters: Dict = None,
         title: str = None,
+        check_completion: bool = True,  # [New]
+        completion_threshold: float = 0.9,  # [New]
         **sns_kwargs,
     ):
         """
         [General Tool] 通用散点相关性分析工具。
         """
+        # [New] 检查完成率
+        if check_completion:
+            self.check_completion(threshold=completion_threshold)
+
         metrics = [y]
         if size and size not in metrics:
             metrics.append(size)

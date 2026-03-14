@@ -40,25 +40,67 @@ class ExperimentResult:
         """
         guides = [
             # --- 核心指标 ---
-            {"Type": "Metric", "Name": "p99_fct", "Desc": "99th Percentile Flow Completion Time (us)"},
+            {
+                "Type": "Metric",
+                "Name": "p99_fct",
+                "Desc": "99th Percentile Flow Completion Time (us)",
+            },
             {"Type": "Metric", "Name": "max_fct", "Desc": "Maximum FCT observed (us)"},
-            {"Type": "Metric", "Name": "max_drop_rate", "Desc": "Peak Trim/Drop rate (from queue usage)"},
-            {"Type": "Metric", "Name": "fairness_index", "Desc": "Jain's Fairness Index for FCTs"},
-            {"Type": "Metric", "Name": "queue_stability", "Desc": "Coefficient of Variation (CV) of Queue Depth"},
-            
+            {
+                "Type": "Metric",
+                "Name": "max_drop_rate",
+                "Desc": "Peak Trim/Drop rate (from queue usage)",
+            },
+            {
+                "Type": "Metric",
+                "Name": "fairness_index",
+                "Desc": "Jain's Fairness Index for FCTs",
+            },
+            {
+                "Type": "Metric",
+                "Name": "queue_stability",
+                "Desc": "Coefficient of Variation (CV) of Queue Depth",
+            },
             # --- 数据表 ---
-            {"Type": "DataFrame", "Name": "flow_df", "Desc": "Flow-level log: [src, dst, size, fct_ns, start_time]"},
-            {"Type": "DataFrame", "Name": "queue_df", "Desc": "Queue sampling: [time, queue_id, max_q, utilization]"},
-            {"Type": "DataFrame", "Name": "traffic_df", "Desc": "Packet-level trace (if enabled): [time, event, size]"},
-            {"Type": "DataFrame", "Name": "switch_df", "Desc": "Switch buffer metrics: [last_q, min_q, max_q]"},
-            
+            {
+                "Type": "DataFrame",
+                "Name": "flow_df",
+                "Desc": "Flow-level log: [src, dst, size, fct_ns, start_time]",
+            },
+            {
+                "Type": "DataFrame",
+                "Name": "queue_df",
+                "Desc": "Queue sampling: [time, queue_id, max_q, utilization]",
+            },
+            {
+                "Type": "DataFrame",
+                "Name": "traffic_df",
+                "Desc": "Packet-level trace (if enabled): [time, event, size]",
+            },
+            {
+                "Type": "DataFrame",
+                "Name": "switch_df",
+                "Desc": "Switch buffer metrics: [last_q, min_q, max_q]",
+            },
             # --- 动作/工具 ---
-            {"Type": "Action", "Name": "report", "Desc": "Object: AutoVisualizer for quick plots (res.report.show())"},
-            {"Type": "Action", "Name": "export_config()", "Desc": "Generate a reproduction YAML for this specific run"},
-            {"Type": "Action", "Name": "params", "Desc": "Dict: Merged parameters (cmd args + variables)"},
+            {
+                "Type": "Action",
+                "Name": "report",
+                "Desc": "Object: AutoVisualizer for quick plots (res.report.show())",
+            },
+            {
+                "Type": "Action",
+                "Name": "export_config()",
+                "Desc": "Generate a reproduction YAML for this specific run",
+            },
+            {
+                "Type": "Action",
+                "Name": "params",
+                "Desc": "Dict: Merged parameters (cmd args + variables)",
+            },
         ]
         df = pd.DataFrame(guides)
-        pd.set_option('display.max_colwidth', None)
+        pd.set_option("display.max_colwidth", None)
         return df
 
     def _compute_metric(self, name: str):
@@ -95,12 +137,12 @@ class ExperimentResult:
             # 优先使用 queue_usage (轻量级日志)
             if not self.queue_usage_df.empty:
                 return float(self.queue_usage_df["trim_frac"].max())
-            
+
             # 如果有 detailed traffic log (重量级)
             if not self.traffic_df.empty:
-                 # CUM_TRAFFIC: cum_drop / cum_arr
-                 # 这需要重新计算，暂时通过 queue_usage 覆盖大多数情况
-                 pass
+                # CUM_TRAFFIC: cum_drop / cum_arr
+                # 这需要重新计算，暂时通过 queue_usage 覆盖大多数情况
+                pass
             return 0.0
 
         # 2. RTO 相关指标 (依赖 traffic 日志)
@@ -147,10 +189,10 @@ class ExperimentResult:
         # [Modified] Allow initialization if EITHER log OR snapshot exists
         log_exists = (self.base_dir / self.FILES["log"]).exists()
         snapshot_exists = (self.base_dir / "snapshot").exists()
-        
+
         if not log_exists and not snapshot_exists:
             # Only warn if neither exists (strict check might break lazy loading)
-             pass
+            pass
 
     # ==========================
     # Snapshot / Parquet Support
@@ -176,7 +218,7 @@ class ExperimentResult:
         """Save DataFrame to parquet snapshot."""
         if df.empty:
             return
-        
+
         # [Guard] Only save if the simulation was successful (avoid partial data in cache)
         if require_success and not self.is_success:
             return
@@ -195,7 +237,7 @@ class ExperimentResult:
                 with gzip.open(path, "rt", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
-                 print(f"[Warn] Failed to load JSON snapshot {name}: {e}")
+                print(f"[Warn] Failed to load JSON snapshot {name}: {e}")
         return None
 
     def _save_json_snapshot(self, name: str, data: Dict):
@@ -216,16 +258,16 @@ class ExperimentResult:
         """
         print(f"  - Snapshotting flows...")
         self._save_snapshot("flows", self.flow_df)
-        
+
         print(f"  - Snapshotting traffic (this may take time)...")
         self._save_snapshot("traffic", self.traffic_df)
-        
+
         print(f"  - Snapshotting queues...")
         self._save_snapshot("queues", self._raw_sampling_df)
-        
+
         print(f"  - Snapshotting nic/switches...")
         self._save_snapshot("nic", self.nic_df)
-        
+
         print(f"  - Snapshotting cwnd...")
         self._save_snapshot("cwnd", self.cwnd_df)
         # Add others as needed
@@ -337,7 +379,7 @@ class ExperimentResult:
         """从 IdMap 注入名称到 DataFrame，优先使用 IdMap 覆盖现有 Name"""
         if df.empty:
             return df
-        
+
         if not self.idmap.data:
             # [Warn] Critical for snapshots: If idmap is missing, do NOT return polluted name-less df
             # to logic that might save snapshots later.
@@ -371,7 +413,7 @@ class ExperimentResult:
         if not self.stdout_path.exists():
             return pd.DataFrame()
         df = cwnd.parse_cwnd_from_file(self.stdout_path)
-        
+
         # 3. Save Snapshot
         self._save_snapshot("cwnd", df)
         return df
@@ -387,7 +429,7 @@ class ExperimentResult:
         if not self.log_path.exists():
             return pd.DataFrame()
         df = flow.parse_flow_events_from_file(self.log_path.as_posix())
-        
+
         # 3. Save Snapshot
         self._save_snapshot("flows", df)
         return df
@@ -427,10 +469,12 @@ class ExperimentResult:
             # try to re-inject it now if idmap is available.
             if "name" not in cached.columns or cached["name"].isna().all():
                 if self.idmap.data:
-                    print(f"[Fix] Snapshot 'traffic' is missing names, re-injecting dynamically...")
+                    print(
+                        f"[Fix] Snapshot 'traffic' is missing names, re-injecting dynamically..."
+                    )
                     return self._inject_name(cached, "location_id")
             return cached
-            
+
         # 2. Parse Log
         if not self.log_path.exists():
             return pd.DataFrame()
@@ -442,7 +486,7 @@ class ExperimentResult:
 
         # 注入位置名称：将 location_id 映射为物理组件名
         df = self._inject_name(df, "location_id")
-        
+
         # 3. Save Snapshot (Only if idmap was present to avoid poisoning)
         if self.idmap.data:
             self._save_snapshot("traffic", df)
@@ -473,7 +517,7 @@ class ExperimentResult:
         # NIC 不需要 Name (IdMap 也没有 NIC ID)
         if "name" in df.columns:
             df = df.drop(columns=["name"])
-            
+
         # 3. Save Snapshot
         if self.idmap.data:
             self._save_snapshot("nic", df)
@@ -537,7 +581,7 @@ class ExperimentResult:
         cached = self._load_snapshot("queues")
         if cached is not None:
             return cached
-            
+
         if not self.log_path.exists():
             return pd.DataFrame()
 
@@ -729,10 +773,10 @@ class ExperimentResult:
                 for line in f:
                     match = pattern.search(line)
                     if match:
-                         return int(match.group(1))
+                        return int(match.group(1))
         except Exception:
             pass
-            
+
         # If not found, try to parse target_name as an integer flow ID
         try:
             target_id_int = int(target_name)
@@ -746,31 +790,31 @@ class ExperimentResult:
         Used for Plotly/Sequence diagrams.
         """
         from ..parser import flow_debug
-        
-        if not flow_name: 
-             return {}
-        
+
+        if not flow_name:
+            return {}
+
         # 1. Try Snapshot (Compressed JSON)
         trace_id = f"trace_{flow_name}"
         cached = self._load_json_snapshot(trace_id)
         if cached is not None:
-             return cached
+            return cached
 
         # 2. Parse Log (if exists)
         if not self.stdout_path.exists():
             print(f"[Warn] No stdout.log found at {self.stdout_path}")
             return {}
-            
+
         try:
-             # Read full log (expensive but necessary for grep-less extraction)
+            # Read full log (expensive but necessary for grep-less extraction)
             with open(self.stdout_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
             data = flow_debug.parse_flow_trace(content, flow_name)
-            
+
             # 3. Save Snapshot
             if data:
-                 self._save_json_snapshot(trace_id, data)
-            
+                self._save_json_snapshot(trace_id, data)
+
             return data
         except Exception as e:
             print(f"Error parsing trace: {e}")
@@ -936,6 +980,57 @@ class ExperimentResult:
 
         return AutoVisualizer(self)
 
+    @cached_property
+    def completion_info(self) -> Dict[str, Any]:
+        """
+        [New] 计算当前实验的流完成率信息。
+
+        Returns:
+            Dict with keys:
+            - expected_flows: 期望的总流数（基于 traffic 参数计算）
+            - completed_flows: 实际完成的流数
+            - completion_rate: 完成率 (0.0 - 1.0)
+            - is_complete: 是否全部完成 (完成率 >= 0.99)
+        """
+        # 计算期望流数
+        # 支持多种流量模式：
+        # 1. 标准模式: conns * flows
+        # 2. Incast/Outcast 分离模式: conns_incast + conns_outcast
+        # 3. 单连接模式: 只有 conns 没有 flows
+
+        conns = int(self.get_param("conns", default=0))
+        flows = int(self.get_param("flows", default=0))
+        conns_incast = int(self.get_param("conns_incast", default=0))
+        conns_outcast = int(self.get_param("conns_outcast", default=0))
+
+        # 计算期望流数
+        if conns_incast > 0 or conns_outcast > 0:
+            # Incast/Outcast 分离模式
+            expected = conns_incast + conns_outcast
+        elif flows > 0:
+            # 标准模式: conns * flows
+            expected = conns * flows
+        else:
+            # 单连接模式或无法确定
+            expected = conns
+
+        # 实际完成的流数
+        completed = len(self.flow_df)
+
+        # 计算完成率
+        if expected > 0:
+            rate = completed / expected
+        else:
+            # 如果无法确定期望流数，假设全部完成（保守估计）
+            rate = 1.0 if completed > 0 else 0.0
+
+        return {
+            "expected_flows": expected,
+            "completed_flows": completed,
+            "completion_rate": rate,
+            "is_complete": rate >= 0.99,
+        }
+
     def _get_identity_string(self) -> str:
         """
         从 status.yaml 的 variables 字段生成身份标识字符串。
@@ -967,7 +1062,7 @@ class ExperimentResult:
             source_path = (self.base_dir / p).resolve()
         else:
             source_path = p
-            
+
         all_params = data.get("all_params", {})
 
         # 1. 生成身份标识与文件名
@@ -1015,26 +1110,28 @@ class ExperimentResult:
         # [Auto-Detect] 自动锁定最惨流并填入 debug_flowid
         sd_df = self.flow_slowdown_df
         if not sd_df.empty:
-             sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
-             # Try to find a flow that exists in trace logs
-             target_internal_id = None
-             target_name = None
-             
-             for _, row in sorted_worst.iterrows():
-                 fid = row["flow_id"]
-                 fname = self.idmap.get(fid)
-                 if fname:
-                     # Parse trace to get internal ID (Group 2 flowId)
-                     events = self.get_flow_trace_data(fname)
-                     # Check if we got valid internal ID
-                     if events and events.get("internal_id"):
-                         target_name = fname
-                         target_internal_id = events["internal_id"][0]
-                         break
-            
-             if target_internal_id is not None:
-                 sim_params["debug_flowid"] = int(target_internal_id)
-                 print(f"ℹ️ [Export] Auto-detected worst flow: {target_name} (InternalID: {target_internal_id})")
+            sorted_worst = sd_df.sort_values(by="slowdown", ascending=False)
+            # Try to find a flow that exists in trace logs
+            target_internal_id = None
+            target_name = None
+
+            for _, row in sorted_worst.iterrows():
+                fid = row["flow_id"]
+                fname = self.idmap.get(fid)
+                if fname:
+                    # Parse trace to get internal ID (Group 2 flowId)
+                    events = self.get_flow_trace_data(fname)
+                    # Check if we got valid internal ID
+                    if events and events.get("internal_id"):
+                        target_name = fname
+                        target_internal_id = events["internal_id"][0]
+                        break
+
+            if target_internal_id is not None:
+                sim_params["debug_flowid"] = int(target_internal_id)
+                print(
+                    f"ℹ️ [Export] Auto-detected worst flow: {target_name} (InternalID: {target_internal_id})"
+                )
 
         # 提取可执行程序名
         original_cmd = data.get("command", "")
@@ -1053,8 +1150,12 @@ class ExperimentResult:
         yaml_str = yaml.dump(repro_config, sort_keys=False, indent=2)
 
         # [Auto-Inject] 简单字符串替换注入注释
-        yaml_str = yaml_str.replace("debug: true", "debug: true # [Auto] Enable CWND logging")
-        yaml_str = yaml_str.replace("logtime: 0.01", "logtime: 0.01 # [Auto] High precision")
+        yaml_str = yaml_str.replace(
+            "debug: true", "debug: true # [Auto] Enable CWND logging"
+        )
+        yaml_str = yaml_str.replace(
+            "logtime: 0.01", "logtime: 0.01 # [Auto] High precision"
+        )
 
         with open(target_path, "w", encoding="utf-8") as f:
             f.write(yaml_str)
@@ -1067,14 +1168,13 @@ class ExperimentResult:
         Returns a list of detected issues (dicts).
         """
         from .. import diagnose_deadlock
-        
+
         if not self.log_path.exists() or not self.stdout_path.exists():
             return []
-            
+
         try:
             return diagnose_deadlock.check_deadlock_issues(
-                self.log_path.as_posix(), 
-                self.stdout_path.as_posix()
+                self.log_path.as_posix(), self.stdout_path.as_posix()
             )
         except Exception as e:
             print(f"[Diagnose Error] {self.base_dir.name}: {e}")
