@@ -79,7 +79,8 @@ typedef enum {
     UECPULL,
     UECACK,
     UECNACK,
-    UECRTS
+    UECRTS,
+    UECPROBE
 } packet_type;
 
 typedef enum { NONE, UP, DOWN } packet_direction;

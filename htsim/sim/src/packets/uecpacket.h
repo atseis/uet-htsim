@@ -374,14 +374,14 @@ class UecRtsPacket : public UecDataPacket {
 
 public:
     inline static UecRtsPacket* newpkt(PacketFlow& flow,
-                                       const Route* route,
+                                       const Route& route,
                                        seq_t epsn,
                                        pull_quanta pull_target,
                                        uint32_t destination = UINT32_MAX) {
         UecRtsPacket* p = _packetdb.allocPacket();
         // p->set_route(flow,route,ACKSIZE,0);
         p->set_attrs(flow, ACKSIZE, 0);
-        if (route) {
+        if (&route) {
             // we may want to late-bind the route
             p->set_route();
         }
@@ -407,6 +407,52 @@ public:
 
 protected:
     static PacketDB<UecRtsPacket> _packetdb;
+};
+
+class UecProbePacket : public UecBasePacket {
+    using Packet::set_route;
+
+public:
+    inline static UecProbePacket* newpkt(PacketFlow& flow,
+                                         const Route* route,
+                                         seq_t payload_psn,
+                                         uint16_t probe_opaque,
+                                         uint32_t destination = UINT32_MAX) {
+        UecProbePacket* p = _packetdb.allocPacket();
+        p->set_attrs(flow, ACKSIZE, 0);
+        if (route) {
+            p->set_route();
+        }
+        assert(p->size() == ACKSIZE);
+
+        p->_type = UECPROBE;
+        p->_is_header = true;
+        p->_bounced = false;
+        p->_payload_psn = payload_psn;
+        p->_probe_opaque = probe_opaque;
+        p->_direction = NONE;
+        p->set_dst(destination);
+
+        p->_eqsrcid = 0;
+        p->_eqtgtid = 0;
+
+        return p;
+    }
+
+    void free() { set_pathid(UINT32_MAX), _packetdb.freePacket(this); }
+
+    inline seq_t payload_psn() const { return _payload_psn; }
+    inline uint16_t probe_opaque() const { return _probe_opaque; }
+
+    virtual PktPriority priority() const { return Packet::PRIO_HI; }
+
+    virtual ~UecProbePacket() {}
+
+protected:
+    seq_t _payload_psn;
+    uint16_t _probe_opaque;
+
+    static PacketDB<UecProbePacket> _packetdb;
 };
 
 #endif
