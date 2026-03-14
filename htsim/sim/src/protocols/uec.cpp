@@ -1050,27 +1050,28 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
     }
 
     if (_sender_based_cc && _enable_sleek) {
-        // probe packets
-        if (_probe_timer_when != 0) {
-            if (_probe_timer_handle->second != this) {
-                if (_flow.flow_id() == _debug_flowid) {
-                    cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
-                         << " an assert soon" << endl;
-                }
-            }
-            // Don't cancel - just reset timer. Old timer will be ignored in doNextEvent.
+        // UEC spec §3.5.15.4.3: Clear retry counter when any ACK is received
+        _tail_loss_retx_cnt = 0;
+
+        // UEC spec §3.5.15.4.3: Restart Tail Loss Timer if there are unacknowledged packets
+        if (cum_ack < _highest_sent || _backlog > 0) {
+            // Cancel existing timer
             _probe_timer_when = 0;
             _probe_timer_handle = eventlist().nullHandle();
-        }
-        if (cum_ack < _highest_sent || _backlog > 0) {
+
+            // Restart timer with appropriate interval
             if (_backlog == 0) {
                 _probe_timer_when = eventlist().now() + (_base_rtt + _target_Qdelay);
             } else {
                 _probe_timer_when = eventlist().now() + probe_first_trial_time * _base_rtt;
             }
-            // Schedule new timer - old one will be ignored if it fires
             _probe_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
+        } else {
+            // No unacknowledged packets, disable timer
+            _probe_timer_when = 0;
+            _probe_timer_handle = eventlist().nullHandle();
         }
+
         if (pkt.is_probe_ack() && delay < _target_Qdelay) {
             _loss_recovery_mode = true;
             _recovery_seqno = _highest_sent;
@@ -1087,17 +1088,8 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
                      << " probe_rtt_high " << timeAsUs(delay) << " target "
                      << timeAsUs(_target_Qdelay) << " - rescheduling probe" << endl;
             }
-            // Reset probe timer to retry
-            if (cum_ack < _highest_sent || _backlog > 0) {
-                _probe_timer_when = eventlist().now() + probe_retry_time * _base_rtt;
-                // Schedule new timer - old one will be ignored if it fires
-                _probe_timer_handle =
-                    eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
-            }
+            // Reset probe timer to retry (already done above)
         }
-
-        // Resume RTO timer after processing Probe ACK (UEC spec §3.5.15.4.3)
-        resumeRTO();
 
         runSleek(ooo, cum_ack);
     }
@@ -1529,9 +1521,25 @@ void UecSrc::processNack(const UecNackPacket& pkt) {
     _nic.logReceivedCtrl(pkt.size());
     _stats.nacks_received++;
 
-    // Clear tail loss retry counter on NACK (UEC spec §3.5.15.4.3)
-    if (_tail_loss_retx_cnt > 0) {
+    // UEC spec §3.5.15.4.3: Restart Tail Loss Timer on any NACK if there are unacknowledged packets
+    if (_sender_based_cc && _enable_sleek) {
         _tail_loss_retx_cnt = 0;
+
+        // Check if there are still unacknowledged packets
+        if (!_tx_bitmap.empty() || _backlog > 0) {
+            _probe_timer_when = 0;
+            _probe_timer_handle = eventlist().nullHandle();
+
+            if (_backlog == 0) {
+                _probe_timer_when = eventlist().now() + (_base_rtt + _target_Qdelay);
+            } else {
+                _probe_timer_when = eventlist().now() + probe_first_trial_time * _base_rtt;
+            }
+            _probe_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
+        } else {
+            _probe_timer_when = 0;
+            _probe_timer_handle = eventlist().nullHandle();
+        }
     }
 
     // auto pullno = pkt.pullno();
@@ -1638,21 +1646,6 @@ void UecSrc::processPull(const UecPullPacket& pkt) {
 
 void UecSrc::doNextEvent() {
     if (_rtx_timeout_pending && eventlist().now() == _rtx_timeout) {
-        // Check if RTO is paused (during Probe transmission)
-        if (_rto_paused) {
-            // RTO fired while paused - reschedule it
-            if (_rto_remaining_when_paused > 0) {
-                _rtx_timeout = eventlist().now() + _rto_remaining_when_paused;
-                _rto_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _rtx_timeout);
-                if (_rto_timer_handle == eventlist().nullHandle()) {
-                    _rtx_timeout_pending = false;
-                }
-            } else {
-                _rtx_timeout_pending = false;
-            }
-            return;
-        }
-
         clearRTO();
         assert(_logger == 0);
 
@@ -1674,6 +1667,21 @@ void UecSrc::doNextEvent() {
             }
             _probe_timer_when = 0;
             _probe_timer_handle = eventlist().nullHandle();
+
+            // Increment retry count when timer expires (UEC spec §3.5.15.4.3)
+            _tail_loss_retx_cnt++;
+
+            // Check if max retry count reached
+            if (_tail_loss_retx_cnt >= MAX_TAIL_LOSS_RETX) {
+                if (_flow.flow_id() == _debug_flowid) {
+                    cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
+                         << " MAX_TAIL_LOSS_RETX reached " << _tail_loss_retx_cnt
+                         << " - stopping probes, let RTO handle" << endl;
+                }
+                // Stop sending probes, let RTO handle the loss
+                return;
+            }
+
             sendProbe();
         }
     }
@@ -2078,47 +2086,6 @@ void UecSrc::cancelRTO() {
     }
 }
 
-void UecSrc::pauseRTO() {
-    // Pause RTO timer when sending Probe (UEC spec §3.5.15.4.3)
-    // Instead of canceling the timer (which can cause assertion failures),
-    // we just mark it as paused and record remaining time
-    if (_rtx_timeout_pending && !_rto_paused) {
-        _rto_paused = true;
-        _rto_remaining_when_paused = _rtx_timeout - eventlist().now();
-        if (_rto_remaining_when_paused < 0)
-            _rto_remaining_when_paused = 0;
-
-        // Note: We don't cancel the timer here - just mark as paused
-        // The timer will still fire but will be ignored if still paused
-        if (_debug_src) {
-            cout << timeAsUs(eventlist().now()) << " " << _flow.str()
-                 << " RTO paused, remaining: " << timeAsUs(_rto_remaining_when_paused) << endl;
-        }
-    }
-}
-
-void UecSrc::resumeRTO() {
-    // Resume RTO timer after receiving Probe ACK (UEC spec §3.5.15.4.3)
-    if (_rto_paused) {
-        _rto_paused = false;
-        if (_rto_remaining_when_paused > 0) {
-            // Restart the timer with remaining time
-            _rtx_timeout = eventlist().now() + _rto_remaining_when_paused;
-            _rto_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _rtx_timeout);
-            if (_rto_timer_handle == eventlist().nullHandle()) {
-                _rtx_timeout_pending = false;
-            } else {
-                _rtx_timeout_pending = true;
-            }
-        }
-
-        if (_debug_src) {
-            cout << timeAsUs(eventlist().now()) << " " << _flow.str()
-                 << " RTO resumed, expires at: " << timeAsUs(_rtx_timeout) << endl;
-        }
-    }
-}
-
 mem_b UecSrc::sendNewPacket(const Route& route) {
     if (_debug_src)
         cout << timeAsUs(eventlist().now()) << " " << _flow.str() << " " << _nodename
@@ -2228,22 +2195,11 @@ mem_b UecSrc::sendRtxPacket(const Route& route) {
 }
 
 void UecSrc::sendProbe() {
-    // Check if max retry count reached (UEC spec §3.5.15.4.3)
-    if (_tail_loss_retx_cnt >= MAX_TAIL_LOSS_RETX) {
-        if (_flow.flow_id() == _debug_flowid) {
-            cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id()
-                 << " sendProbe MAX_RETX reached " << _tail_loss_retx_cnt
-                 << " - stopping probes, let RTO handle" << endl;
-        }
-        return;
-    }
-
     if (_flow.flow_id() == _debug_flowid) {
         cout << timeAsUs(eventlist().now()) << " flowid " << _flow.flow_id() << " sendProbe "
              << " _probe_seqno " << _probe_seqno + 1 << " retry " << _tail_loss_retx_cnt << endl;
     }
     _probe_seqno++;
-    _tail_loss_retx_cnt++;  // Increment retry count
     auto* p = UecDataPacket::newpkt(_flow, NULL, _probe_seqno, _hdr_size, UecBasePacket::DATA_PROBE,
                                     0, _dstaddr);
     p->set_dst(_dstaddr);
@@ -2263,9 +2219,6 @@ void UecSrc::sendProbe() {
 
     _probe_send_time = eventlist().now();
     _probe_timer_when = eventlist().now() + probe_retry_time * _base_rtt;
-
-    // Pause RTO timer when Probe is sent (UEC spec §3.5.15.4.3)
-    pauseRTO();
 
     // Schedule new probe timer
     // Note: We don't cancel old timer - if it fires, doNextEvent checks _probe_timer_when
