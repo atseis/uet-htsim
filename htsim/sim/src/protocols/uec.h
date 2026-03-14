@@ -411,6 +411,12 @@ private:
     simtime_picosec _last_rts;       // time when we last sent an RTS (or zero if never sent)
     EventList::Handle _rto_timer_handle;
 
+    // RTO pause/resume for Probe (UEC spec §3.5.15.4.3)
+    bool _rto_paused = false;
+    simtime_picosec _rto_remaining_when_paused = 0;
+    void pauseRTO();
+    void resumeRTO();
+
     // used to drive ACK clock
     uint64_t _recvd_bytes;
 

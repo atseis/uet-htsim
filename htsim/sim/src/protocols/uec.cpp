@@ -1101,6 +1101,10 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
                     eventlist().sourceIsPendingGetHandle(*this, _probe_timer_when);
             }
         }
+
+        // Resume RTO timer after processing Probe ACK (UEC spec §3.5.15.4.3)
+        resumeRTO();
+
         runSleek(ooo, cum_ack);
     }
 
@@ -2065,6 +2069,45 @@ void UecSrc::cancelRTO() {
     }
 }
 
+void UecSrc::pauseRTO() {
+    // Pause RTO timer when sending Probe (UEC spec §3.5.15.4.3)
+    if (_rtx_timeout_pending && !_rto_paused) {
+        _rto_paused = true;
+        _rto_remaining_when_paused = _rtx_timeout - eventlist().now();
+        if (_rto_remaining_when_paused < 0)
+            _rto_remaining_when_paused = 0;
+
+        eventlist().cancelPendingSourceByHandle(*this, _rto_timer_handle);
+        _rto_timer_handle = eventlist().nullHandle();
+
+        if (_debug_src) {
+            cout << timeAsUs(eventlist().now()) << " " << _flow.str()
+                 << " RTO paused, remaining: " << timeAsUs(_rto_remaining_when_paused) << endl;
+        }
+    }
+}
+
+void UecSrc::resumeRTO() {
+    // Resume RTO timer after receiving Probe ACK (UEC spec §3.5.15.4.3)
+    if (_rto_paused) {
+        _rto_paused = false;
+        if (_rto_remaining_when_paused > 0) {
+            _rtx_timeout = eventlist().now() + _rto_remaining_when_paused;
+            _rto_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _rtx_timeout);
+            if (_rto_timer_handle == eventlist().nullHandle()) {
+                _rtx_timeout_pending = false;
+            } else {
+                _rtx_timeout_pending = true;
+            }
+        }
+
+        if (_debug_src) {
+            cout << timeAsUs(eventlist().now()) << " " << _flow.str()
+                 << " RTO resumed, expires at: " << timeAsUs(_rtx_timeout) << endl;
+        }
+    }
+}
+
 mem_b UecSrc::sendNewPacket(const Route& route) {
     if (_debug_src)
         cout << timeAsUs(eventlist().now()) << " " << _flow.str() << " " << _nodename
@@ -2209,6 +2252,9 @@ void UecSrc::sendProbe() {
 
     _probe_send_time = eventlist().now();
     _probe_timer_when = eventlist().now() + probe_retry_time * _base_rtt;
+
+    // Pause RTO timer when Probe is sent (UEC spec §3.5.15.4.3)
+    pauseRTO();
 
     // Safety check: if there is currently a pending timer, cancel it before overwriting the handle
     if (_probe_timer_handle != eventlist().nullHandle()) {
