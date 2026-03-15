@@ -178,6 +178,7 @@ public:
     static void setMinRTO(uint32_t min_rto_in_us) {
         _min_rto = timeFromUs((uint32_t)min_rto_in_us);
     }
+    static void setMaxRtoRetxCnt(uint8_t max_cnt) { _max_rto_retx_cnt = max_cnt; }
     void setCwnd(mem_b cwnd) {
         //_maxwnd = cwnd;
         _cwnd = cwnd;
@@ -285,6 +286,10 @@ private:
     void createSendRecord(UecDataPacket::seq_t seqno, mem_b pkt_size);
     void queueForRtx(UecBasePacket::seq_t seqno, mem_b pkt_size);
     bool validateSendTs(UecBasePacket::seq_t acked_psn, bool rtx_echo);
+    // RTO exponential backoff and max retry count (UEC spec §3.5.15, Table 3-58)
+    uint8_t _rto_retry_count = 0;      // RTO retransmission counter
+    static uint8_t _max_rto_retx_cnt;  // Max RTO retry count, default 5
+
     void recalculateRTO();
     void startRTO(simtime_picosec send_time);
     void clearRTO();   // timer just expired, clear the state

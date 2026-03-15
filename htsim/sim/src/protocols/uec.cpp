@@ -91,6 +91,9 @@ float UecSrc::loss_retx_factor = 1.5;
 int UecSrc::min_retx_config = 5;
 /* End SLEEK parameters */
 
+// UEC spec §3.5.15, Table 3-58: Max_RTO_Retx_Cnt, default 5
+uint8_t UecSrc::_max_rto_retx_cnt = 5;
+
 void UecSrc::initNsccParams(simtime_picosec network_rtt,
                             linkspeed_bps linkspeed,
                             simtime_picosec target_Qdelay,
@@ -1102,6 +1105,11 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
 
     stopSpeculating();
 
+    // UEC spec §3.5.15: Reset RTO retry count on successful ACK
+    if (_rto_retry_count > 0) {
+        _rto_retry_count = 0;
+    }
+
     if (checkFinished(cum_ack)) {
         return;
     }
@@ -2047,7 +2055,9 @@ void UecSrc::startRTO(simtime_picosec send_time) {
     if (!_rtx_timeout_pending) {
         // timer is not running - start it
         _rtx_timeout_pending = true;
-        _rtx_timeout = send_time + _min_rto;
+        // UEC spec §3.5.15: RTO_TIMER = RTO_INIT_TIME × 2^retry_count
+        simtime_picosec backoff = _min_rto << _rto_retry_count;
+        _rtx_timeout = send_time + backoff;
         _rto_send_time = send_time;
 
         if (_rtx_timeout < eventlist().now())
@@ -2055,7 +2065,9 @@ void UecSrc::startRTO(simtime_picosec send_time) {
 
         if (_debug_src)
             cout << "Start timer at " << timeAsUs(eventlist().now()) << " source " << _flow.str()
-                 << " expires at " << timeAsUs(_rtx_timeout) << " flow " << _flow.str() << endl;
+                 << " expires at " << timeAsUs(_rtx_timeout) << " flow " << _flow.str()
+                 << " backoff " << timeAsUs(backoff) << " retry_count " << (int)_rto_retry_count
+                 << endl;
 
         _rto_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _rtx_timeout);
         if (_rto_timer_handle == eventlist().nullHandle()) {
@@ -2066,7 +2078,8 @@ void UecSrc::startRTO(simtime_picosec send_time) {
         }
     } else {
         // timer is already running
-        if (send_time + _min_rto < _rtx_timeout) {
+        simtime_picosec backoff = _min_rto << _rto_retry_count;
+        if (send_time + backoff < _rtx_timeout) {
             // RTO needs to expire earlier than it is currently set
             cancelRTO();
             startRTO(send_time);
@@ -2380,6 +2393,17 @@ void UecSrc::recalculateRTO() {
 void UecSrc::rtxTimerExpired() {
     assert(eventlist().now() == _rtx_timeout);
     clearRTO();
+
+    // UEC spec §3.5.15, Table 3-58: Check Max_RTO_Retx_Cnt
+    if (_rto_retry_count >= _max_rto_retx_cnt) {
+        if (_debug_src)
+            cout << "Max RTO retries exceeded (" << (int)_max_rto_retx_cnt << ") for flow "
+                 << _flow.str() << endl;
+        _done_sending = true;
+        return;
+    }
+
+    _rto_retry_count++;
 
     // If _send_times is empty, all packets have been acknowledged (possibly
     // via probe-based recovery while RTO was paused). Nothing to do.
