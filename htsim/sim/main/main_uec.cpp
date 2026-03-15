@@ -254,6 +254,8 @@ int main(int argc, char** argv) {
                 qt = AEOLUS;
             } else if (!strcmp(argv[i + 1], "aeolus_ecn")) {
                 qt = AEOLUS_ECN;
+            } else if (!strcmp(argv[i + 1], "shared_buffer")) {
+                qt = SHARED_BUFFER;
             } else {
                 cout << "Unknown queue type " << argv[i + 1] << endl;
                 exit_error(argv[0]);

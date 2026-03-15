@@ -13,6 +13,7 @@
 #include "network.h"
 #include "pipe.h"
 #include "randomqueue.h"
+#include "sharedbufferpool.h"
 #include "switch.h"
 #include "topology.h"
 
@@ -36,7 +37,8 @@ typedef enum {
     SWIFT_SCHEDULER,
     ECN_PRIO,
     AEOLUS,
-    AEOLUS_ECN
+    AEOLUS_ECN,
+    SHARED_BUFFER
 } queue_type;
 typedef enum { UPLINK, DOWNLINK } link_direction;
 #endif
@@ -357,6 +359,9 @@ private:
     int64_t find_core_switch(Queue* queue);
     int64_t find_destination(Queue* queue);
     void alloc_vectors();
+
+    // Shared buffer pools for each tier (used by SHARED_BUFFER queue type)
+    vector<unique_ptr<SharedBufferPool>> _shared_buffer_pools;
 };
 
 #endif

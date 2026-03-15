@@ -16,6 +16,8 @@
 #include "queue_lossless.h"
 #include "queue_lossless_input.h"
 #include "queue_lossless_output.h"
+#include "sharedbufferpool.h"
+#include "sharedbufferqueue.h"
 #include "swift_scheduler.h"
 
 // use tokenize from connection matrix
@@ -833,6 +835,15 @@ FatTreeTopology::FatTreeTopology(const FatTreeTopologyCfg* cfg,
     }
     alloc_vectors();
 
+    // Initialize shared buffer pools for each tier if using SHARED_BUFFER queue type
+    if (cfg->_qt == SHARED_BUFFER) {
+        for (int tier = TOR_TIER; tier <= CORE_TIER; tier++) {
+            mem_b total_buffer = _cfg->_queue_down[tier];
+            mem_b threshold = total_buffer * 0.8;  // Use 80% of buffer as threshold
+            _shared_buffer_pools.push_back(make_unique<SharedBufferPool>(total_buffer, threshold));
+        }
+    }
+
     QueueLogger* queueLogger;
     if (_cfg->_tiers == 3) {
         for (uint32_t j = 0; j < _cfg->NCORE; j++) {
@@ -1364,6 +1375,28 @@ BaseQueue* FatTreeTopology::alloc_queue(QueueLogger* queueLogger,
             if (!tor || dir == UPLINK || _cfg->_enable_ecn_on_tor_downlink) {
                 // don't use ECN on ToR downlinks unless configured so.
                 q->set_ecn_threshold(FatTreeSwitch::_ecn_threshold_fraction * queuesize);
+            }
+            return q;
+        }
+        case SHARED_BUFFER: {
+            // Get the shared buffer pool for this tier
+            assert(switch_tier >= 0 && switch_tier < (int)_shared_buffer_pools.size());
+            SharedBufferPool& pool = *_shared_buffer_pools[switch_tier];
+
+            // Create SharedBufferQueue with the pool
+            // is_low_priority=true for uplink queues, false for downlink
+            SharedBufferQueue* q = new SharedBufferQueue(speed, queuesize, *_eventlist, queueLogger,
+                                                         pool, dir == UPLINK);
+
+            // Set ECN thresholds if enabled
+            if (_cfg->_enable_ecn) {
+                if (!tor || dir == UPLINK || _cfg->_enable_ecn_on_tor_downlink) {
+                    if (reduced_speed)
+                        q->setEcnThresholds(_cfg->_ecn_low * _cfg->_failed_link_ratio,
+                                            _cfg->_ecn_high * _cfg->_failed_link_ratio);
+                    else
+                        q->setEcnThresholds(_cfg->_ecn_low, _cfg->_ecn_high);
+                }
             }
             return q;
         }
