@@ -312,6 +312,7 @@ private:
     void processNack(const UecNackPacket& pkt);
     void processPull(const UecPullPacket& pkt);
     void runSleek(uint32_t ooo, UecBasePacket::seq_t cum_ack);
+    void processDelayedNackRetransmissions();
 
     // added for NSCC
     bool can_send_NSCC(mem_b pkt_size);
@@ -457,6 +458,15 @@ private:
     int _tail_loss_retx_cnt = 0;  // Current retry count for tail loss probes
     EventList::Handle _probe_timer_handle;
     /******** END Probe parameters *********/
+
+    /******** NACK Retransmission parameters (UEC spec §3.5.15, Table 3-58) *********/
+    static simtime_picosec _nack_retx_times[4];
+    static uint8_t _max_nack_retx_cnt;
+    map<UecDataPacket::seq_t, uint8_t> _nack_rtx_counts;
+    map<UecDataPacket::seq_t, pair<mem_b, simtime_picosec>> _nack_delayed_rtx_queue;
+    simtime_picosec _gen_ack_timer_period;
+    simtime_picosec _last_ack_sent_time;
+    /******** END NACK Retransmission parameters *********/
 
     // Connectivity
     PacketFlow _flow;
