@@ -628,6 +628,7 @@ private:
     UecBasePacket::seq_t _high_epsn;
     UecBasePacket::seq_t
         _ref_epsn;  // used for SACK bitmap calculation in spec, unused here for NOW.
+    UecBasePacket::seq_t _sack_base_track;  // UEC spec §3.5.12.3.1: SACK_Base_Track for bitmap base
     UecBasePacket::pull_quanta _retx_backlog;
     UecBasePacket::pull_quanta _latest_pull;
     UecBasePacket::pull_quanta _highest_pull_target;
