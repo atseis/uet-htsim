@@ -305,12 +305,23 @@ class UecNackPacket : public UecBasePacket {
     using Packet::set_route;
 
 public:
+    // UEC NACK codes per spec Table 3-59
+    enum NackCode {
+        UET_PKT_NOT_RCVD = 0x01,      // Packet not received
+        UET_DUP_PKT_RCVD = 0x02,      // Duplicate packet received
+        UET_OUT_OF_WINDOW = 0x03,     // Out of window
+        UET_UNEXP_RETRANSMIT = 0x04,  // Unexpected retransmission
+        UET_TRIMMED = 0x05,           // Packet was trimmed
+        UET_TRIMMED_LASTHOP = 0x06    // Packet was trimmed at last hop
+    };
+
     inline static UecNackPacket* newpkt(PacketFlow& flow,
                                         const Route* route,
-                                        seq_t ref_epsn, /*pull_quanta pullno, */
+                                        seq_t ref_epsn,
                                         uint16_t path_id,
                                         uint64_t recv_bytes,
                                         uint64_t tbytes,
+                                        NackCode nack_code = UET_PKT_NOT_RCVD,
                                         uint32_t destination = UINT32_MAX) {
         UecNackPacket* p = _packetdb.allocPacket();
         p->set_attrs(flow, ACKSIZE, ref_epsn);
@@ -324,11 +335,11 @@ public:
         p->_is_header = true;
         p->_bounced = false;
         p->_ref_epsn = ref_epsn;
-        // p->_pullno = pullno;
-        p->_ev = path_id;  // used to indicate which path the data packet was trimmed on
+        p->_ev = path_id;
         p->set_pathid(path_id);
         p->_ecn_echo = false;
         p->_rnr = false;
+        p->_nack_code = nack_code;
 
         p->_direction = NONE;
         p->_path_len = 0;
@@ -343,7 +354,6 @@ public:
 
     void free() { set_pathid(UINT32_MAX), _packetdb.freePacket(this); }
     inline seq_t ref_ack() const { return _ref_epsn; }
-    // inline pull_quanta pullno() const {return _pullno;}
     uint16_t ev() const { return _ev; }
     inline void set_ecn_echo(bool ecn_echo) { _ecn_echo = ecn_echo; }
     inline bool ecn_echo() const { return _ecn_echo; }
@@ -352,17 +362,22 @@ public:
 
     inline void set_last_hop(bool lh) { _last_hop = lh; }
     inline bool last_hop() const { return _last_hop; }
+
+    // NACK code accessors
+    inline void set_nack_code(NackCode code) { _nack_code = code; }
+    inline NackCode nack_code() const { return _nack_code; }
+
     virtual PktPriority priority() const { return Packet::PRIO_HI; }
 
     virtual ~UecNackPacket() {}
 
 protected:
     seq_t _ref_epsn;
-    // pull_quanta _pullno;
     uint16_t _ev;
     uint64_t _recvd_bytes;
     uint64_t _target_bytes;
     bool _last_hop;
+    NackCode _nack_code;
 
     bool _rnr;
     bool _ecn_echo;
