@@ -453,6 +453,11 @@ private:
     EventList::Handle _probe_timer_handle;
     /******** END Probe parameters *********/
 
+    /******** RTO parameters (UEC spec §3.5.15) *********/
+    uint8_t _rto_retry_count = 0;      // RTO retransmission counter for exponential backoff
+    static uint8_t _max_rto_retx_cnt;  // Max RTO retries before declaring failure
+    /******** END RTO parameters *********/
+
     // Connectivity
     PacketFlow _flow;
     string _nodename;
@@ -533,7 +538,11 @@ public:
                        bool ce,
                        bool rtx_echo);
 
-    UecNackPacket* nack(uint16_t path_id, UecBasePacket::seq_t seqno, bool last_hop, bool ecn_echo);
+    UecNackPacket* nack(uint16_t path_id,
+                        UecBasePacket::seq_t seqno,
+                        bool last_hop,
+                        bool ecn_echo,
+                        UecNackPacket::NackCode nack_code = UecNackPacket::UET_PKT_NOT_RCVD);
 
     UecBasePacket::pull_quanta backlog() {
         if (_highest_pull_target > _latest_pull)

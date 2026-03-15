@@ -89,7 +89,10 @@ int UecSrc::probe_first_trial_time = 3;
 int UecSrc::probe_retry_time = 5;
 float UecSrc::loss_retx_factor = 1.5;
 int UecSrc::min_retx_config = 5;
-/* End SLEEK parameters */
+
+/* RTO parameters (UEC spec §3.5.15) */
+uint8_t UecSrc::_max_rto_retx_cnt = 5;  // Default from UEC spec Table 3-58
+/* End RTO parameters */
 
 void UecSrc::initNsccParams(simtime_picosec network_rtt,
                             linkspeed_bps linkspeed,
@@ -906,6 +909,11 @@ void UecSrc::processAck(const UecAckPacket& pkt) {
              << _recvd_bytes << " newly_recvd_bytes " << newly_recvd_bytes << endl;
     }
     _stats.acks_received++;
+
+    // UEC spec §3.5.15: Reset RTO retry count on successful ACK
+    if (_rto_retry_count > 0) {
+        _rto_retry_count = 0;
+    }
 
     // decrease flightsize.
     _in_flight -= newly_recvd_bytes;
@@ -2047,7 +2055,12 @@ void UecSrc::startRTO(simtime_picosec send_time) {
     if (!_rtx_timeout_pending) {
         // timer is not running - start it
         _rtx_timeout_pending = true;
-        _rtx_timeout = send_time + _min_rto;
+
+        // UEC spec §3.5.15: Exponential backoff - RTO = RTO_INIT_TIME × 2^retry_count
+        // Cap at retry_count = 7 to prevent overflow (128x min_rto max)
+        uint8_t shift = (_rto_retry_count > 7) ? 7 : _rto_retry_count;
+        simtime_picosec backoff = _min_rto << shift;
+        _rtx_timeout = send_time + backoff;
         _rto_send_time = send_time;
 
         if (_rtx_timeout < eventlist().now())
@@ -2055,7 +2068,8 @@ void UecSrc::startRTO(simtime_picosec send_time) {
 
         if (_debug_src)
             cout << "Start timer at " << timeAsUs(eventlist().now()) << " source " << _flow.str()
-                 << " expires at " << timeAsUs(_rtx_timeout) << " flow " << _flow.str() << endl;
+                 << " expires at " << timeAsUs(_rtx_timeout) << " backoff " << timeAsUs(backoff)
+                 << " retry_count " << (int)_rto_retry_count << " flow " << _flow.str() << endl;
 
         _rto_timer_handle = eventlist().sourceIsPendingGetHandle(*this, _rtx_timeout);
         if (_rto_timer_handle == eventlist().nullHandle()) {
@@ -2066,7 +2080,9 @@ void UecSrc::startRTO(simtime_picosec send_time) {
         }
     } else {
         // timer is already running
-        if (send_time + _min_rto < _rtx_timeout) {
+        uint8_t shift = (_rto_retry_count > 7) ? 7 : _rto_retry_count;
+        simtime_picosec backoff = _min_rto << shift;
+        if (send_time + backoff < _rtx_timeout) {
             // RTO needs to expire earlier than it is currently set
             cancelRTO();
             startRTO(send_time);
@@ -2386,6 +2402,23 @@ void UecSrc::rtxTimerExpired() {
     if (_send_times.empty()) {
         return;
     }
+
+    // UEC spec §3.5.15: Check Max_RTO_Retx_Cnt before retransmission
+    if (_rto_retry_count >= _max_rto_retx_cnt) {
+        if (_debug_src)
+            cout << "Max RTO retries exceeded (" << (int)_rto_retry_count
+                 << "), declaring failure for flow " << _flow.str() << endl;
+        _done_sending = true;
+        // Trigger end notification if needed
+        if (_end_trigger) {
+            _end_trigger->activate();
+        }
+        return;
+    }
+
+    // Increment retry count for exponential backoff (UEC spec §3.5.15)
+    _rto_retry_count++;
+    _stats.rto_events++;
 
     auto first_entry = _send_times.begin();
     auto seqno = first_entry->second;
@@ -3112,9 +3145,10 @@ UecAckPacket* UecSink::sack(uint16_t path_id,
 UecNackPacket* UecSink::nack(uint16_t path_id,
                              UecBasePacket::seq_t seqno,
                              bool last_hop,
-                             bool ecn_echo) {
-    UecNackPacket* pkt =
-        UecNackPacket::newpkt(_flow, NULL, seqno, path_id, _recvd_bytes, _rcv_cwnd_pen, _srcaddr);
+                             bool ecn_echo,
+                             UecNackPacket::NackCode nack_code) {
+    UecNackPacket* pkt = UecNackPacket::newpkt(_flow, NULL, seqno, path_id, _recvd_bytes,
+                                               _rcv_cwnd_pen, nack_code, _srcaddr);
     pkt->set_last_hop(last_hop);
     pkt->set_ecn_echo(ecn_echo);
     return pkt;
