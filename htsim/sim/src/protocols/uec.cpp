@@ -1527,6 +1527,53 @@ void UecSrc::processNack(const UecNackPacket& pkt) {
     _nic.logReceivedCtrl(pkt.size());
     _stats.nacks_received++;
 
+    // Get nack_code and handle according to UEC Spec v1.0 Table 3-59
+    uint8_t nack_code = pkt.nack_code();
+
+    if (_debug_src) {
+        cout << _flow.str() << " " << _nodename << " processNack code: " << (int)nack_code
+             << " flow " << _flow.str() << endl;
+    }
+
+    // Handle different NACK codes as per UEC specification
+    switch (nack_code) {
+        case UET_PKT_NOT_RCVD:
+            // Packet not received - standard retransmission needed
+            // This is the default case, continue with normal processing
+            break;
+        case UET_DUP_PKT_RCVD:
+            // Duplicate packet received - may indicate reordering or spurious retransmission
+            // Log but continue with normal processing
+            if (_debug_src) {
+                cout << _flow.str() << " NACK: duplicate packet received" << endl;
+            }
+            break;
+        case UET_OUT_OF_WINDOW:
+            // Packet out of window - protocol error or stale packet
+            if (_debug_src) {
+                cout << _flow.str() << " NACK: packet out of window" << endl;
+            }
+            // Continue with normal processing as sender may have stale state
+            break;
+        case UET_UNEXP_RETRANSMIT:
+            // Unexpected retransmit - receiver got packet it wasn't expecting
+            if (_debug_src) {
+                cout << _flow.str() << " NACK: unexpected retransmit" << endl;
+            }
+            break;
+        case UET_TRIMMED:
+        case UET_TRIMMED_LASTHOP:
+            // Packet was trimmed - this is the normal trim case
+            // Continue with normal processing which handles trimming
+            break;
+        default:
+            // Unknown NACK code - log warning but continue with normal processing
+            if (_debug_src) {
+                cout << _flow.str() << " NACK: unknown code " << (int)nack_code << endl;
+            }
+            break;
+    }
+
     // UEC spec §3.5.15.4.3: Restart Tail Loss Timer on any NACK if there are unacknowledged packets
     if (_sender_based_cc && _enable_sleek) {
         _tail_loss_retx_cnt = 0;
@@ -2869,7 +2916,8 @@ void UecSink::processTrimmed(const UecDataPacket& pkt) {
              << " flow " << _src->flow()->str() << endl;
 
     UecNackPacket* nack_packet =
-        nack(pkt.path_id(), pkt.epsn(), is_last_hop, (bool)(pkt.flags() & ECN_CE));
+        nack(pkt.path_id(), pkt.epsn(), is_last_hop, (bool)(pkt.flags() & ECN_CE),
+             is_last_hop ? UET_TRIMMED_LASTHOP : UET_TRIMMED);
 
     // nack_packet->sendOn();
     _nic.sendControlPacket(nack_packet, NULL, this);
@@ -3112,9 +3160,10 @@ UecAckPacket* UecSink::sack(uint16_t path_id,
 UecNackPacket* UecSink::nack(uint16_t path_id,
                              UecBasePacket::seq_t seqno,
                              bool last_hop,
-                             bool ecn_echo) {
-    UecNackPacket* pkt =
-        UecNackPacket::newpkt(_flow, NULL, seqno, path_id, _recvd_bytes, _rcv_cwnd_pen, _srcaddr);
+                             bool ecn_echo,
+                             uint8_t nack_code) {
+    UecNackPacket* pkt = UecNackPacket::newpkt(_flow, NULL, seqno, path_id, _recvd_bytes,
+                                               _rcv_cwnd_pen, nack_code, _srcaddr);
     pkt->set_last_hop(last_hop);
     pkt->set_ecn_echo(ecn_echo);
     return pkt;

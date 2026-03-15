@@ -533,7 +533,11 @@ public:
                        bool ce,
                        bool rtx_echo);
 
-    UecNackPacket* nack(uint16_t path_id, UecBasePacket::seq_t seqno, bool last_hop, bool ecn_echo);
+    UecNackPacket* nack(uint16_t path_id,
+                        UecBasePacket::seq_t seqno,
+                        bool last_hop,
+                        bool ecn_echo,
+                        uint8_t nack_code = UET_PKT_NOT_RCVD);
 
     UecBasePacket::pull_quanta backlog() {
         if (_highest_pull_target > _latest_pull)

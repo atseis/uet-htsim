@@ -301,6 +301,16 @@ protected:
     static PacketDB<UecAckPacket> _packetdb;
 };
 
+// NACK Codes (UEC Spec v1.0 Table 3-59)
+enum UecNackCode {
+    UET_PKT_NOT_RCVD = 0x01,      // Packet not received
+    UET_DUP_PKT_RCVD = 0x02,      // Duplicate packet received
+    UET_OUT_OF_WINDOW = 0x03,     // Packet out of window
+    UET_UNEXP_RETRANSMIT = 0x04,  // Unexpected retransmit
+    UET_TRIMMED = 0x05,           // Packet was trimmed
+    UET_TRIMMED_LASTHOP = 0x06    // Packet was trimmed at last hop
+};
+
 class UecNackPacket : public UecBasePacket {
     using Packet::set_route;
 
@@ -311,6 +321,7 @@ public:
                                         uint16_t path_id,
                                         uint64_t recv_bytes,
                                         uint64_t tbytes,
+                                        uint8_t nack_code = UET_PKT_NOT_RCVD,
                                         uint32_t destination = UINT32_MAX) {
         UecNackPacket* p = _packetdb.allocPacket();
         p->set_attrs(flow, ACKSIZE, ref_epsn);
@@ -337,6 +348,8 @@ public:
         p->_recvd_bytes = recv_bytes;
         p->_target_bytes = tbytes;
         p->_last_hop = false;
+        p->_nack_code = nack_code;
+        p->_retry_cnt = 0;
 
         return p;
     }
@@ -352,6 +365,10 @@ public:
 
     inline void set_last_hop(bool lh) { _last_hop = lh; }
     inline bool last_hop() const { return _last_hop; }
+    inline uint8_t nack_code() const { return _nack_code; }
+    inline void set_nack_code(uint8_t code) { _nack_code = code; }
+    inline uint8_t retry_cnt() const { return _retry_cnt; }
+    inline void set_retry_cnt(uint8_t cnt) { _retry_cnt = cnt; }
     virtual PktPriority priority() const { return Packet::PRIO_HI; }
 
     virtual ~UecNackPacket() {}
@@ -363,6 +380,8 @@ protected:
     uint64_t _recvd_bytes;
     uint64_t _target_bytes;
     bool _last_hop;
+    uint8_t _nack_code;  // NACK reason code (UEC Spec v1.0 Table 3-59)
+    uint8_t _retry_cnt;  // Retry count
 
     bool _rnr;
     bool _ecn_echo;
