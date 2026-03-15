@@ -91,6 +91,11 @@ float UecSrc::loss_retx_factor = 1.5;
 int UecSrc::min_retx_config = 5;
 /* End SLEEK parameters */
 
+/* NACK Retransmission parameters (UEC spec §3.5.15, Table 3-58) */
+simtime_picosec UecSrc::_nack_retx_times[4] = {0, 0, 0, 0};
+uint8_t UecSrc::_max_nack_retx_cnt = 5;
+/* End NACK Retransmission parameters */
+
 void UecSrc::initNsccParams(simtime_picosec network_rtt,
                             linkspeed_bps linkspeed,
                             simtime_picosec target_Qdelay,
@@ -772,10 +777,19 @@ mem_b UecSrc::handleCumulativeAck(UecDataPacket::seq_t cum_ack) {
         if (send_time == _rto_send_time) {
             recalculateRTO();
         }
-        // we can safely remove the number of retranmission times if we receive the packets' ACK
         auto rtx_time = _rtx_times.find(seqno);
         if (rtx_time != _rtx_times.end()) {
             _rtx_times.erase(rtx_time);
+        }
+
+        auto nack_count = _nack_rtx_counts.find(seqno);
+        if (nack_count != _nack_rtx_counts.end()) {
+            _nack_rtx_counts.erase(nack_count);
+        }
+
+        auto delayed_rtx = _nack_delayed_rtx_queue.find(seqno);
+        if (delayed_rtx != _nack_delayed_rtx_queue.end()) {
+            _nack_delayed_rtx_queue.erase(delayed_rtx);
         }
     }
     return newly_acked;
@@ -1618,7 +1632,37 @@ void UecSrc::processNack(const UecNackPacket& pkt) {
     delFromSendTimes(send_time, seqno);
 
     stopSpeculating();
-    queueForRtx(seqno, pkt_size);
+
+    uint8_t nack_code_idx = 0;
+    simtime_picosec delay = _nack_retx_times[nack_code_idx];
+
+    if (delay > 0) {
+        auto nack_count_it = _nack_rtx_counts.find(seqno);
+        uint8_t current_nack_count =
+            (nack_count_it != _nack_rtx_counts.end()) ? nack_count_it->second : 0;
+
+        if (current_nack_count >= _max_nack_retx_cnt) {
+            if (_debug_src)
+                cout << _flow.str() << " " << _nodename
+                     << " Max NACK retries exceeded for seqno: " << seqno << " flow " << _flow.str()
+                     << endl;
+            _done_sending = true;
+            return;
+        }
+
+        _nack_rtx_counts[seqno] = current_nack_count + 1;
+
+        simtime_picosec ready_time = eventlist().now() + delay;
+        _nack_delayed_rtx_queue[seqno] = make_pair(pkt_size, ready_time);
+
+        if (_debug_src)
+            cout << _flow.str() << " " << _nodename
+                 << " NACK delayed retransmission scheduled for seqno: " << seqno << " delay "
+                 << timeAsUs(delay) << "us ready at " << timeAsUs(ready_time) << "us flow "
+                 << _flow.str() << endl;
+    } else {
+        queueForRtx(seqno, pkt_size);
+    }
 
     if (send_time == _rto_send_time) {
         recalculateRTO();
@@ -1690,6 +1734,32 @@ void UecSrc::doNextEvent() {
 
             sendProbe();
         }
+    }
+
+    // Process delayed NACK retransmissions
+    processDelayedNackRetransmissions();
+}
+
+void UecSrc::processDelayedNackRetransmissions() {
+    simtime_picosec now = eventlist().now();
+    vector<pair<UecDataPacket::seq_t, mem_b>> ready_packets;
+
+    for (auto it = _nack_delayed_rtx_queue.begin(); it != _nack_delayed_rtx_queue.end();) {
+        if (it->second.second <= now) {
+            ready_packets.emplace_back(it->first, it->second.first);
+            it = _nack_delayed_rtx_queue.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    for (auto& [seqno, pkt_size] : ready_packets) {
+        queueForRtx(seqno, pkt_size);
+
+        if (_debug_src)
+            cout << _flow.str() << " " << _nodename
+                 << " NACK delayed retransmission executed for seqno: " << seqno << " flow "
+                 << _flow.str() << endl;
     }
 }
 
