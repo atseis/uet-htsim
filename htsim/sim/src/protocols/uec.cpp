@@ -2540,6 +2540,8 @@ UecSink::UecSink(TrafficLogger* trafficLogger,
       _pullPacer(pullPacer),
       _expected_epsn(0),
       _high_epsn(0),
+      _sack_base_track(
+          0),  // UEC spec §3.5.12.3.1: SACK_Base_Track starts at CACK_PSN (0 initially)
       _retx_backlog(0),
       _latest_pull(INIT_PULL),
       _highest_pull_target(INIT_PULL),
@@ -2583,6 +2585,7 @@ UecSink::UecSink(TrafficLogger* trafficLogger,
       _flow(trafficLogger),
       _expected_epsn(0),
       _high_epsn(0),
+      _sack_base_track(0),  // UEC spec §3.5.12.3.1: SACK_Base_Track starts at CACK_PSN
       _retx_backlog(0),
       _latest_pull(INIT_PULL),
       _highest_pull_target(INIT_PULL),
@@ -2702,6 +2705,12 @@ void UecSink::processData(UecDataPacket& pkt) {
         // highest_received is used to bound the sack bitmap. This is a 64 bit number in simulation,
         // never wraps. In practice need to handle sequence number wrapping.
         _high_epsn = pkt.epsn();
+    }
+
+    // UEC spec §3.5.12.3.1: Update SACK_Base_Track when receiving packets
+    // SACK_Base_Track starts at CACK_PSN, prefers lowest unacknowledged PSN
+    if (pkt.epsn() < _sack_base_track) {
+        _sack_base_track = pkt.epsn();
     }
 
     // should send an ACK; if incoming packet is ECN marked, the ACK will be sent straight away;
@@ -3047,7 +3056,18 @@ bool UecSink::shouldSack() {
 }
 
 UecBasePacket::seq_t UecSink::sackBitmapBase(UecBasePacket::seq_t epsn) {
-    return max((int64_t)epsn - 63, (int64_t)(_expected_epsn + 1));
+    // UEC spec §3.5.12.3.1: SACK_Base_Track algorithm
+    // SACK_Base_Track starts at CACK_PSN, prefers lowest unacknowledged PSN
+    // SACK_Base is limited to increase by at most 64 from SACK_Base_Track
+    UecBasePacket::seq_t base = _sack_base_track;
+
+    // Limit maximum increase to 64 from the track position
+    if (base + 64 < _high_epsn) {
+        base = _high_epsn - 64;
+    }
+
+    // Ensure base doesn't go below expected_epsn + 1
+    return max(base, (UecBasePacket::seq_t)(_expected_epsn + 1));
 }
 
 UecBasePacket::seq_t UecSink::sackBitmapBaseIdeal() {
